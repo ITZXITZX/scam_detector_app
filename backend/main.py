@@ -39,6 +39,13 @@ from pydantic import BaseModel
 if TYPE_CHECKING:
     from rapidocr import RapidOCR
 
+# On Windows, tesseract.exe usually isn't on PATH after install; fall back to
+# the default UB-Mannheim install location if the binary isn't otherwise found.
+if os.name == "nt" and shutil.which("tesseract") is None:
+    _default_tesseract = Path(r"C:\Program Files\Tesseract-OCR\tesseract.exe")
+    if _default_tesseract.exists():
+        pytesseract.pytesseract.tesseract_cmd = str(_default_tesseract)
+
 # Recording ids are generated as uuid4().hex[:12]; reject anything else to
 # avoid path traversal through the recording_id path parameter.
 _RECORDING_ID_PATTERN = re.compile(r"^[0-9a-f]{8,32}$")
