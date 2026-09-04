@@ -5,3 +5,5 @@ imageio-ffmpeg==0.6.0
 pytesseract==0.3.13
 pillow>=10.0
 anthropic>=1.0
+rapidocr==3.9.2
+onnxruntime==1.29.0

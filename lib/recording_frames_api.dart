@@ -143,6 +143,64 @@ class AnalyzeResult {
       );
 }
 
+/// A single recognized line of text with its bounding box, from `/recordings/{id}/ocr`.
+class OCRText {
+  final String text;
+  final double left;
+  final double top;
+  final double right;
+  final double bottom;
+  final double confidence;
+
+  OCRText({
+    required this.text,
+    required this.left,
+    required this.top,
+    required this.right,
+    required this.bottom,
+    required this.confidence,
+  });
+
+  factory OCRText.fromJson(Map<String, dynamic> json) => OCRText(
+        text: json['text'] as String,
+        left: (json['left'] as num).toDouble(),
+        top: (json['top'] as num).toDouble(),
+        right: (json['right'] as num).toDouble(),
+        bottom: (json['bottom'] as num).toDouble(),
+        confidence: (json['confidence'] as num).toDouble(),
+      );
+}
+
+/// OCR output for a single frame.
+class FrameOCRResult {
+  final String frameId;
+  final List<OCRText> texts;
+
+  FrameOCRResult({required this.frameId, required this.texts});
+
+  factory FrameOCRResult.fromJson(Map<String, dynamic> json) => FrameOCRResult(
+        frameId: json['frameId'] as String,
+        texts: (json['texts'] as List)
+            .map((e) => OCRText.fromJson(e as Map<String, dynamic>))
+            .toList(),
+      );
+}
+
+/// Result of a `/recordings/{id}/ocr` call.
+class OCRResult {
+  final String recordingId;
+  final List<FrameOCRResult> frames;
+
+  OCRResult({required this.recordingId, required this.frames});
+
+  factory OCRResult.fromJson(Map<String, dynamic> json) => OCRResult(
+        recordingId: json['recordingId'] as String,
+        frames: (json['frames'] as List)
+            .map((e) => FrameOCRResult.fromJson(e as Map<String, dynamic>))
+            .toList(),
+      );
+}
+
 class RecordingFramesApi {
   /// The Android emulator maps 10.0.2.2 to the host machine's localhost.
   /// For a real device, replace this with your machine's LAN IP.
@@ -166,5 +224,16 @@ class RecordingFramesApi {
     }
 
     return AnalyzeResult.fromJson(jsonDecode(response.body) as Map<String, dynamic>);
+  }
+
+  static Future<OCRResult> runOcr(String recordingId) async {
+    final uri = Uri.parse('$baseUrl/recordings/$recordingId/ocr');
+    final response = await http.post(uri);
+
+    if (response.statusCode != 200) {
+      throw Exception('Backend returned ${response.statusCode}: ${response.body}');
+    }
+
+    return OCRResult.fromJson(jsonDecode(response.body) as Map<String, dynamic>);
   }
 }

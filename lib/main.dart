@@ -37,6 +37,9 @@ class _RecordingHomePageState extends State<RecordingHomePage> {
   String? _recordingPath;
   String? _errorMessage;
   AnalyzeResult? _result;
+  OCRResult? _ocrResult;
+  bool _ocrLoading = false;
+  String? _ocrError;
 
   Future<bool> _ensurePermissions() async {
     // Android 13+ requires explicit notification permission for the
@@ -107,7 +110,31 @@ class _RecordingHomePageState extends State<RecordingHomePage> {
       _recordingPath = null;
       _result = null;
       _errorMessage = null;
+      _ocrResult = null;
+      _ocrLoading = false;
+      _ocrError = null;
     });
+  }
+
+  Future<void> _runOcr() async {
+    if (_result == null) return;
+    setState(() {
+      _ocrLoading = true;
+      _ocrError = null;
+    });
+
+    try {
+      final ocrResult = await RecordingFramesApi.runOcr(_result!.recordingId);
+      setState(() {
+        _ocrResult = ocrResult;
+        _ocrLoading = false;
+      });
+    } catch (err) {
+      setState(() {
+        _ocrLoading = false;
+        _ocrError = 'OCR failed: $err';
+      });
+    }
   }
 
   @override
@@ -320,7 +347,64 @@ class _RecordingHomePageState extends State<RecordingHomePage> {
             },
           ),
         ),
+        const SizedBox(height: 16),
+        Expanded(child: _buildOcrSection()),
       ],
+    );
+  }
+
+  Widget _buildOcrSection() {
+    if (_ocrLoading) {
+      return const Row(
+        children: [
+          SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2)),
+          SizedBox(width: 12),
+          Text('Running OCR...'),
+        ],
+      );
+    }
+
+    if (_ocrError != null) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(_ocrError!, style: const TextStyle(color: Colors.red)),
+          const SizedBox(height: 8),
+          ElevatedButton.icon(
+            onPressed: _runOcr,
+            icon: const Icon(Icons.text_fields),
+            label: const Text('Retry OCR'),
+          ),
+        ],
+      );
+    }
+
+    if (_ocrResult == null) {
+      return ElevatedButton.icon(
+        onPressed: _runOcr,
+        icon: const Icon(Icons.text_fields),
+        label: const Text('Extract text (OCR)'),
+      );
+    }
+
+    return ListView.builder(
+      itemCount: _ocrResult!.frames.length,
+      itemBuilder: (context, index) {
+        final frame = _ocrResult!.frames[index];
+        if (frame.texts.isEmpty) return const SizedBox.shrink();
+        return Padding(
+          padding: const EdgeInsets.only(bottom: 12),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(frame.frameId, style: Theme.of(context).textTheme.labelLarge),
+              for (final text in frame.texts)
+                Text('  "${text.text}"  (${(text.confidence * 100).toStringAsFixed(0)}%)'),
+            ],
+          ),
+        );
+      },
     );
   }
 }

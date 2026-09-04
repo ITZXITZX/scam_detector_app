@@ -1,10 +1,16 @@
-"""Iteration 2 backend: extract preview frames and OCR them with bounding boxes.
+"""Backend: extract frames, dedup, OCR, reconstruct the transcript, and assess scam risk.
 
-Requires the Tesseract binary on PATH (macOS: `brew install tesseract`).
+Requires the Tesseract binary on PATH (macOS: `brew install tesseract`) for the
+integrated /recordings/analyze pipeline. Set ANTHROPIC_API_KEY to enable the AI
+scam-risk verdict; without it the analysis degrades gracefully.
 
 Run with:
     pip install -r requirements.txt
     uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+
+Note: RapidOCR downloads its ONNX detection/classification/recognition models
+(a few MB) on first use and caches them under the rapidocr package directory,
+so the first OCR request needs network access; later requests run offline.
 """
 
 from __future__ import annotations
@@ -13,11 +19,14 @@ import asyncio
 import difflib
 import json
 import os
+import re
 import shutil
 import subprocess
+import threading
 import time
 import uuid
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import anthropic
 import imageio_ffmpeg
@@ -26,6 +35,13 @@ from fastapi import FastAPI, HTTPException, UploadFile
 from fastapi.staticfiles import StaticFiles
 from PIL import Image
 from pydantic import BaseModel
+
+if TYPE_CHECKING:
+    from rapidocr import RapidOCR
+
+# Recording ids are generated as uuid4().hex[:12]; reject anything else to
+# avoid path traversal through the recording_id path parameter.
+_RECORDING_ID_PATTERN = re.compile(r"^[0-9a-f]{8,32}$")
 
 # Frames are extracted every FRAME_INTERVAL_SECONDS seconds.
 FRAME_INTERVAL_SECONDS = 0.5
@@ -90,6 +106,25 @@ class AnalyzeResponse(BaseModel):
     frames: list[FramePreview]
     transcript: list[TranscriptMessage]
     analysis: ScamAnalysis
+
+
+class OCRText(BaseModel):
+    text: str
+    left: float
+    top: float
+    right: float
+    bottom: float
+    confidence: float
+
+
+class FrameOCRResult(BaseModel):
+    frameId: str
+    texts: list[OCRText]
+
+
+class OCRResponse(BaseModel):
+    recordingId: str
+    frames: list[FrameOCRResult]
 
 
 def _extract_frames(video_path: Path, output_dir: Path) -> list[Path]:
@@ -436,6 +471,69 @@ async def analyze_recording(file: UploadFile) -> AnalyzeResponse:
         transcript=[TranscriptMessage(**{k: v for k, v in m.items() if k != "normalized"}) for m in transcript],
         analysis=analysis,
     )
+
+
+_ocr_engine: "RapidOCR | None" = None
+_ocr_engine_lock = threading.Lock()
+
+
+def _get_ocr_engine() -> "RapidOCR":
+    # RapidOCR loads its onnx models on first use, so build it lazily once
+    # instead of slowing down every server startup.
+    global _ocr_engine
+    if _ocr_engine is None:
+        with _ocr_engine_lock:
+            if _ocr_engine is None:
+                from rapidocr import RapidOCR
+
+                _ocr_engine = RapidOCR()
+    return _ocr_engine
+
+
+def _run_ocr_on_frame(frame_path: Path) -> list[OCRText]:
+    engine = _get_ocr_engine()
+    result = engine(str(frame_path))
+    if result.boxes is None or result.txts is None or result.scores is None:
+        return []
+
+    texts: list[OCRText] = []
+    for box, text, score in zip(result.boxes, result.txts, result.scores):
+        xs = [point[0] for point in box]
+        ys = [point[1] for point in box]
+        texts.append(
+            OCRText(
+                text=text,
+                left=round(float(min(xs)), 1),
+                top=round(float(min(ys)), 1),
+                right=round(float(max(xs)), 1),
+                bottom=round(float(max(ys)), 1),
+                confidence=round(float(score), 4),
+            )
+        )
+    return texts
+
+
+@app.post("/recordings/{recording_id}/ocr", response_model=OCRResponse)
+async def ocr_recording(recording_id: str) -> OCRResponse:
+    if not _RECORDING_ID_PATTERN.match(recording_id):
+        raise HTTPException(status_code=400, detail="Invalid recording id")
+
+    recording_dir = STORAGE_DIR / recording_id
+    if not recording_dir.is_dir():
+        raise HTTPException(status_code=404, detail="Recording not found")
+
+    frame_paths = sorted(recording_dir.glob("frame_*.jpg"))
+    if not frame_paths:
+        raise HTTPException(status_code=404, detail="No extracted frames for this recording")
+
+    results = await asyncio.gather(
+        *(asyncio.to_thread(_run_ocr_on_frame, path) for path in frame_paths)
+    )
+    frames = [
+        FrameOCRResult(frameId=path.stem, texts=texts)
+        for path, texts in zip(frame_paths, results)
+    ]
+    return OCRResponse(recordingId=recording_id, frames=frames)
 
 
 async def _sweep_old_recordings() -> None:
