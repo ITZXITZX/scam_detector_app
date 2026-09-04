@@ -7,11 +7,14 @@
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="29" />
     <uses-permission android:name="android.permission.READ_MEDIA_VIDEO" />
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <!-- Needed to upload the recording to the local dev backend for frame extraction. -->
+    <uses-permission android:name="android.permission.INTERNET" />
 
     <application
         android:label="scam_detector_app"
         android:name="${applicationName}"
         android:requestLegacyExternalStorage="true"
+        android:usesCleartextTraffic="true"
         android:icon="@mipmap/ic_launcher">
         <activity
             android:name=".MainActivity"

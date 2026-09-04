@@ -47,6 +47,11 @@ app.*.map.json
 # Widget Preview related
 .widget_preview/
 
+# Backend (Iteration 1 frame extraction) runtime artifacts
+backend/storage/
+backend/__pycache__/
+backend/.venv/
+
 # IDE specific files
 .idea/
 *.iml
