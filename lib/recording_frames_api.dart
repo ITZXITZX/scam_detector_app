@@ -84,6 +84,31 @@ class TranscriptMessage {
       );
 }
 
+/// AI scam-risk verdict over the reconstructed transcript.
+class ScamAnalysis {
+  final String riskLevel; // "low", "medium", "high", or "unavailable"
+  final int riskScore;
+  final String summary;
+  final List<int> flaggedMessageIndexes;
+  final List<String> warnings;
+
+  ScamAnalysis({
+    required this.riskLevel,
+    required this.riskScore,
+    required this.summary,
+    required this.flaggedMessageIndexes,
+    required this.warnings,
+  });
+
+  factory ScamAnalysis.fromJson(Map<String, dynamic> json) => ScamAnalysis(
+        riskLevel: json['riskLevel'] as String,
+        riskScore: json['riskScore'] as int,
+        summary: json['summary'] as String,
+        flaggedMessageIndexes: (json['flaggedMessageIndexes'] as List).cast<int>(),
+        warnings: (json['warnings'] as List).cast<String>(),
+      );
+}
+
 /// Result of a `/recordings/analyze` call.
 class AnalyzeResult {
   final String recordingId;
@@ -91,6 +116,7 @@ class AnalyzeResult {
   final int duplicateFramesDropped;
   final List<FramePreview> frames;
   final List<TranscriptMessage> transcript;
+  final ScamAnalysis? analysis;
 
   AnalyzeResult({
     required this.recordingId,
@@ -98,6 +124,7 @@ class AnalyzeResult {
     required this.duplicateFramesDropped,
     required this.frames,
     required this.transcript,
+    required this.analysis,
   });
 
   factory AnalyzeResult.fromJson(Map<String, dynamic> json) => AnalyzeResult(
@@ -110,6 +137,9 @@ class AnalyzeResult {
         transcript: (json['transcript'] as List? ?? const [])
             .map((e) => TranscriptMessage.fromJson(e as Map<String, dynamic>))
             .toList(),
+        analysis: json['analysis'] == null
+            ? null
+            : ScamAnalysis.fromJson(json['analysis'] as Map<String, dynamic>),
       );
 }
 

@@ -11,12 +11,15 @@ from __future__ import annotations
 
 import asyncio
 import difflib
+import json
+import os
 import shutil
 import subprocess
 import time
 import uuid
 from pathlib import Path
 
+import anthropic
 import imageio_ffmpeg
 import pytesseract
 from fastapi import FastAPI, HTTPException, UploadFile
@@ -72,12 +75,21 @@ class TranscriptMessage(BaseModel):
     evidenceFrameIds: list[str]
 
 
+class ScamAnalysis(BaseModel):
+    riskLevel: str  # "low", "medium", "high", or "unavailable"
+    riskScore: int  # 0-100; 0 when unavailable
+    summary: str
+    flaggedMessageIndexes: list[int]
+    warnings: list[str]
+
+
 class AnalyzeResponse(BaseModel):
     recordingId: str
     frameCount: int
     duplicateFramesDropped: int
     frames: list[FramePreview]
     transcript: list[TranscriptMessage]
+    analysis: ScamAnalysis
 
 
 def _extract_frames(video_path: Path, output_dir: Path) -> list[Path]:
@@ -278,6 +290,98 @@ def _merge_into_transcript(
             match["senderHint"] = bubble["senderHint"]
 
 
+class _LlmCorrection(BaseModel):
+    index: int
+    text: str
+
+
+class _LlmVerdict(BaseModel):
+    riskLevel: str  # "low", "medium", or "high"
+    riskScore: int
+    summary: str
+    flaggedMessageIndexes: list[int]
+    corrections: list[_LlmCorrection]
+    warnings: list[str]
+
+
+_LLM_INSTRUCTIONS = """\
+You are reviewing a messaging conversation reconstructed by OCR from a screen \
+recording, to help the phone's owner decide whether they are being scammed.
+
+You receive a JSON array of messages with fields index, senderHint \
+("left" = other party, "right" = the user, "unknown"), text, and OCR confidence.
+
+Rules:
+- corrections: fix ONLY obvious OCR artifacts (e.g. "lam" for "I am", "|" for \
+"I", "0" for "O") where the intended text is unambiguous from context. Return \
+the full corrected message text. Never invent, complete, or paraphrase content \
+that is not supported by the OCR text. If a message is garbled beyond confident \
+repair, leave it out of corrections and add a warning instead.
+- riskLevel/riskScore/summary: judge scam likelihood from classic signals \
+(urgency pressure, payment or gift-card requests, unexpected fees, links to \
+verify cards or credentials, impersonation of couriers/banks/officials, \
+too-good-to-be-true offers). The summary is one short sentence naming the \
+signals found, or stating that none were found.
+- flaggedMessageIndexes: indexes of the specific messages containing those \
+signals. Empty if none.
+- warnings: uncertainty the user should know about (unreadable messages, \
+ambiguous senders, possible missing messages). Empty if none.
+"""
+
+
+def _run_llm_analysis(transcript: list[dict]) -> tuple[ScamAnalysis, dict[int, str]]:
+    """Ask Claude for OCR corrections and a scam verdict on the transcript.
+
+    Returns the analysis plus {transcript index: corrected text}. Any failure
+    (no API key, network, refusal) degrades to an "unavailable" analysis so the
+    deterministic pipeline keeps working.
+    """
+    unavailable = ScamAnalysis(
+        riskLevel="unavailable",
+        riskScore=0,
+        summary="AI analysis unavailable",
+        flaggedMessageIndexes=[],
+        warnings=[],
+    )
+    if not transcript or not os.environ.get("ANTHROPIC_API_KEY"):
+        return unavailable, {}
+
+    payload = [
+        {
+            "index": i,
+            "senderHint": m["senderHint"],
+            "text": m["text"],
+            "confidence": m["confidence"],
+        }
+        for i, m in enumerate(transcript)
+    ]
+    try:
+        client = anthropic.Anthropic()
+        response = client.messages.parse(
+            model="claude-opus-5",
+            max_tokens=16000,
+            system=_LLM_INSTRUCTIONS,
+            messages=[{"role": "user", "content": json.dumps(payload)}],
+            output_format=_LlmVerdict,
+        )
+        if response.stop_reason == "refusal" or response.parsed_output is None:
+            return unavailable, {}
+        verdict = response.parsed_output
+    except Exception:
+        return unavailable, {}
+
+    valid = range(len(transcript))
+    analysis = ScamAnalysis(
+        riskLevel=verdict.riskLevel if verdict.riskLevel in ("low", "medium", "high") else "unavailable",
+        riskScore=max(0, min(100, verdict.riskScore)),
+        summary=verdict.summary,
+        flaggedMessageIndexes=[i for i in verdict.flaggedMessageIndexes if i in valid],
+        warnings=verdict.warnings,
+    )
+    corrections = {c.index: c.text for c in verdict.corrections if c.index in valid and c.text.strip()}
+    return analysis, corrections
+
+
 @app.post("/recordings/analyze", response_model=AnalyzeResponse)
 async def analyze_recording(file: UploadFile) -> AnalyzeResponse:
     if not file.filename:
@@ -320,12 +424,17 @@ async def analyze_recording(file: UploadFile) -> AnalyzeResponse:
         bubbles = _group_bubbles(texts, frame_width)
         _merge_into_transcript(transcript, bubbles, path.stem, timestamp)
 
+    analysis, corrections = await asyncio.to_thread(_run_llm_analysis, transcript)
+    for i, corrected_text in corrections.items():
+        transcript[i]["text"] = corrected_text
+
     return AnalyzeResponse(
         recordingId=recording_id,
         frameCount=len(frames),
         duplicateFramesDropped=len(frame_paths) - len(frames),
         frames=frames,
         transcript=[TranscriptMessage(**{k: v for k, v in m.items() if k != "normalized"}) for m in transcript],
+        analysis=analysis,
     )
 
 

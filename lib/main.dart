@@ -165,7 +165,7 @@ class _RecordingHomePageState extends State<RecordingHomePage> {
           children: [
             SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2)),
             SizedBox(width: 12),
-            Text('Extracting frames...'),
+            Text('Extracting frames & analyzing conversation...'),
           ],
         );
       case _Stage.done:
@@ -177,7 +177,50 @@ class _RecordingHomePageState extends State<RecordingHomePage> {
     }
   }
 
-  Widget _buildTranscriptBubble(TranscriptMessage message) {
+  Widget _buildRiskBanner(ScamAnalysis analysis) {
+    if (analysis.riskLevel == 'unavailable') {
+      return Padding(
+        padding: const EdgeInsets.only(bottom: 12),
+        child: Text(
+          'AI scam analysis unavailable (no API key configured)',
+          style: Theme.of(context).textTheme.bodySmall,
+        ),
+      );
+    }
+    final (color, icon, label) = switch (analysis.riskLevel) {
+      'high' => (Colors.red.shade100, Icons.warning_amber_rounded, 'LIKELY SCAM'),
+      'medium' => (Colors.amber.shade100, Icons.help_outline, 'SUSPICIOUS'),
+      _ => (Colors.green.shade100, Icons.check_circle_outline, 'LOOKS SAFE'),
+    };
+    return Container(
+      margin: const EdgeInsets.only(bottom: 16),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(color: color, borderRadius: BorderRadius.circular(12)),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(icon, size: 20),
+              const SizedBox(width: 8),
+              Text(label, style: Theme.of(context).textTheme.titleMedium),
+              const Spacer(),
+              Text('risk ${analysis.riskScore}/100'),
+            ],
+          ),
+          const SizedBox(height: 4),
+          Text(analysis.summary),
+          for (final warning in analysis.warnings)
+            Padding(
+              padding: const EdgeInsets.only(top: 4),
+              child: Text('• $warning', style: Theme.of(context).textTheme.bodySmall),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildTranscriptBubble(TranscriptMessage message, {required bool flagged}) {
     final isRight = message.senderHint == 'right';
     final isUnknown = message.senderHint == 'unknown';
     final colorScheme = Theme.of(context).colorScheme;
@@ -199,7 +242,7 @@ class _RecordingHomePageState extends State<RecordingHomePage> {
           crossAxisAlignment: CrossAxisAlignment.start,
           mainAxisSize: MainAxisSize.min,
           children: [
-            Text(message.text),
+            Text(flagged ? '🚩 ${message.text}' : message.text),
             Text(
               '${(message.confidence * 100).round()}% · '
               '${message.firstSeenSeconds.toStringAsFixed(1)}s · '
@@ -213,12 +256,15 @@ class _RecordingHomePageState extends State<RecordingHomePage> {
   }
 
   Widget _buildFramePreview(AnalyzeResult result) {
+    final flagged = result.analysis?.flaggedMessageIndexes.toSet() ?? const <int>{};
     return ListView(
       children: [
+        if (result.analysis != null) _buildRiskBanner(result.analysis!),
         if (result.transcript.isNotEmpty) ...[
           Text('Reconstructed conversation', style: Theme.of(context).textTheme.titleMedium),
           const SizedBox(height: 8),
-          ...result.transcript.map(_buildTranscriptBubble),
+          for (final (index, message) in result.transcript.indexed)
+            _buildTranscriptBubble(message, flagged: flagged.contains(index)),
           const SizedBox(height: 24),
         ],
         Text(
