@@ -28,13 +28,28 @@ If you already cloned the repository, just open a terminal at its root.
 
 ### 2. Set up and start the backend
 
-Open a terminal and run:
+The backend needs the Tesseract OCR binary on PATH:
+
+- macOS: `brew install tesseract`
+- Windows: install from https://github.com/UB-Mannheim/tesseract/wiki
+- Linux: `sudo apt install tesseract-ocr`
+
+Open a terminal and run (Windows PowerShell):
 
 ```powershell
 cd backend
 python -m venv .venv
 .venv\Scripts\python.exe -m pip install -r requirements.txt
 .venv\Scripts\python.exe -m uvicorn main:app --host 0.0.0.0 --port 8000
+```
+
+macOS / Linux:
+
+```bash
+cd backend
+python3 -m venv .venv
+./.venv/bin/pip install -r requirements.txt
+./.venv/bin/python -m uvicorn main:app --host 0.0.0.0 --port 8000
 ```
 
 Keep this terminal running. The API is available at
@@ -90,10 +105,12 @@ For help getting started with Flutter development, view the
 [online documentation](https://docs.flutter.dev/), which offers tutorials,
 samples, guidance on mobile development, and a full API reference.
 
-## Backend (frame extraction service)
+## Backend (frame extraction + OCR service)
 
 The `backend/` folder contains a small FastAPI service that extracts preview
-frames from an uploaded screen recording (Iteration 1 of `docs/plan1.md`).
+frames from an uploaded screen recording and runs Tesseract OCR on each frame,
+returning per-line text with bounding boxes and confidence (Iterations 1 and 2
+of `docs/plan1.md`).
 
 ### Setup
 
@@ -131,7 +148,9 @@ $ffmpeg = (.venv\Scripts\python.exe -c "import imageio_ffmpeg; print(imageio_ffm
 Invoke-RestMethod -Uri http://127.0.0.1:8000/recordings/analyze -Method Post -Form @{ file = Get-Item test_input.mp4 }
 ```
 
-The JSON response lists `frameCount` and each frame's `url`. Confirm the
+The JSON response lists `frameCount` and, for each frame, its `url` plus a
+`texts` array of OCR results (`text`, `left`/`top`/`right`/`bottom` bounding
+box, and `confidence` from 0 to 1). Confirm the
 files exist on disk under `backend/storage/<recordingId>/`, or open
 `http://127.0.0.1:8000/frames/<recordingId>/frame_0001.jpg` in a browser.
 

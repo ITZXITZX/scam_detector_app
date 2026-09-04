@@ -52,6 +52,9 @@ backend/storage/
 backend/__pycache__/
 backend/.venv/
 
+# Gradle build caches (anywhere, including vendored plugins)
+**/.gradle/
+
 # IDE specific files
 .idea/
 *.iml

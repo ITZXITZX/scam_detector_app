@@ -192,7 +192,7 @@ class _RecordingHomePageState extends State<RecordingHomePage> {
           children: [
             SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2)),
             SizedBox(width: 12),
-            Text('Extracting frames...'),
+            Text('Extracting frames & analyzing conversation...'),
           ],
         );
       case _Stage.done:
@@ -204,16 +204,106 @@ class _RecordingHomePageState extends State<RecordingHomePage> {
     }
   }
 
+  Widget _buildRiskBanner(ScamAnalysis analysis) {
+    if (analysis.riskLevel == 'unavailable') {
+      return Padding(
+        padding: const EdgeInsets.only(bottom: 12),
+        child: Text(
+          'AI scam analysis unavailable (no API key configured)',
+          style: Theme.of(context).textTheme.bodySmall,
+        ),
+      );
+    }
+    final (color, icon, label) = switch (analysis.riskLevel) {
+      'high' => (Colors.red.shade100, Icons.warning_amber_rounded, 'LIKELY SCAM'),
+      'medium' => (Colors.amber.shade100, Icons.help_outline, 'SUSPICIOUS'),
+      _ => (Colors.green.shade100, Icons.check_circle_outline, 'LOOKS SAFE'),
+    };
+    return Container(
+      margin: const EdgeInsets.only(bottom: 16),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(color: color, borderRadius: BorderRadius.circular(12)),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(icon, size: 20),
+              const SizedBox(width: 8),
+              Text(label, style: Theme.of(context).textTheme.titleMedium),
+              const Spacer(),
+              Text('risk ${analysis.riskScore}/100'),
+            ],
+          ),
+          const SizedBox(height: 4),
+          Text(analysis.summary),
+          for (final warning in analysis.warnings)
+            Padding(
+              padding: const EdgeInsets.only(top: 4),
+              child: Text('• $warning', style: Theme.of(context).textTheme.bodySmall),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildTranscriptBubble(TranscriptMessage message, {required bool flagged}) {
+    final isRight = message.senderHint == 'right';
+    final isUnknown = message.senderHint == 'unknown';
+    final colorScheme = Theme.of(context).colorScheme;
+    return Align(
+      alignment: isUnknown
+          ? Alignment.center
+          : (isRight ? Alignment.centerRight : Alignment.centerLeft),
+      child: Container(
+        constraints: const BoxConstraints(maxWidth: 280),
+        margin: const EdgeInsets.symmetric(vertical: 3),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        decoration: BoxDecoration(
+          color: isUnknown
+              ? colorScheme.surfaceContainerHighest
+              : (isRight ? colorScheme.primaryContainer : colorScheme.secondaryContainer),
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(flagged ? '🚩 ${message.text}' : message.text),
+            Text(
+              '${(message.confidence * 100).round()}% · '
+              '${message.firstSeenSeconds.toStringAsFixed(1)}s · '
+              '${message.evidenceFrameIds.length} frame${message.evidenceFrameIds.length == 1 ? '' : 's'}',
+              style: Theme.of(context).textTheme.labelSmall,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   Widget _buildFramePreview(AnalyzeResult result) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+    final flagged = result.analysis?.flaggedMessageIndexes.toSet() ?? const <int>{};
+    return ListView(
       children: [
-        Text('${result.frameCount} frames extracted', style: Theme.of(context).textTheme.titleMedium),
+        if (result.analysis != null) _buildRiskBanner(result.analysis!),
+        if (result.transcript.isNotEmpty) ...[
+          Text('Reconstructed conversation', style: Theme.of(context).textTheme.titleMedium),
+          const SizedBox(height: 8),
+          for (final (index, message) in result.transcript.indexed)
+            _buildTranscriptBubble(message, flagged: flagged.contains(index)),
+          const SizedBox(height: 24),
+        ],
+        Text(
+          '${result.frameCount} unique frames'
+          '${result.duplicateFramesDropped > 0 ? ' (${result.duplicateFramesDropped} duplicates removed)' : ''}',
+          style: Theme.of(context).textTheme.titleMedium,
+        ),
         const SizedBox(height: 8),
         SizedBox(
           // Fixed row height keeps every thumbnail's aspect ratio consistent
           // instead of stretching to whatever space happens to be left.
-          height: 320,
+          height: 400,
           child: ListView.builder(
             scrollDirection: Axis.horizontal,
             itemCount: result.frames.length,
@@ -241,6 +331,16 @@ class _RecordingHomePageState extends State<RecordingHomePage> {
                     ),
                     const SizedBox(height: 4),
                     Text('${frame.timestampSeconds.toStringAsFixed(1)}s'),
+                    if (frame.texts.isNotEmpty)
+                      SizedBox(
+                        width: 160,
+                        child: Text(
+                          frame.texts.map((t) => t.text).join('\n'),
+                          maxLines: 4,
+                          overflow: TextOverflow.ellipsis,
+                          style: Theme.of(context).textTheme.bodySmall,
+                        ),
+                      ),
                   ],
                 ),
               );
