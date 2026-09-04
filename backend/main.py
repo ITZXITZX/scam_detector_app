@@ -10,6 +10,7 @@ Run with:
 from __future__ import annotations
 
 import asyncio
+import difflib
 import shutil
 import subprocess
 import time
@@ -31,6 +32,10 @@ DHASH_SIZE = 16
 # considered duplicates (tolerates clock ticks and status-bar noise while
 # still catching a single new chat bubble).
 DUPLICATE_MAX_BIT_DISTANCE = 3
+# Lines on the same side closer than this many line-heights merge into one bubble.
+BUBBLE_MAX_GAP_FACTOR = 1.2
+# Normalized-text similarity at or above which two bubbles are the same message.
+MERGE_SIMILARITY_THRESHOLD = 0.88
 # Recording directories older than this are deleted by the background sweep.
 RETENTION_SECONDS = 15 * 60
 SWEEP_INTERVAL_SECONDS = 60
@@ -58,11 +63,21 @@ class FramePreview(BaseModel):
     texts: list[OcrText]
 
 
+class TranscriptMessage(BaseModel):
+    text: str
+    senderHint: str  # "left", "right", or "unknown"
+    confidence: float
+    firstSeenSeconds: float
+    lastSeenSeconds: float
+    evidenceFrameIds: list[str]
+
+
 class AnalyzeResponse(BaseModel):
     recordingId: str
     frameCount: int
     duplicateFramesDropped: int
     frames: list[FramePreview]
+    transcript: list[TranscriptMessage]
 
 
 def _extract_frames(video_path: Path, output_dir: Path) -> list[Path]:
@@ -158,6 +173,111 @@ def _ocr_frame(image_path: Path) -> list[OcrText]:
     ]
 
 
+def _line_side(line: OcrText, frame_width: int) -> str:
+    """Classify a text line as a left or right chat bubble by its margins."""
+    left_margin = line.left
+    right_margin = frame_width - line.right
+    # Full-width text (headers, timestamps, system notices) has no clear side.
+    if line.right - line.left > frame_width * 0.85:
+        return "unknown"
+    if left_margin < right_margin * 0.66:
+        return "left"
+    if right_margin < left_margin * 0.66:
+        return "right"
+    return "unknown"
+
+
+def _group_bubbles(texts: list[OcrText], frame_width: int) -> list[dict]:
+    """Group OCR lines into message-bubble candidates (Iteration 3).
+
+    Consecutive lines on the same side separated by less than
+    BUBBLE_MAX_GAP_FACTOR line-heights are treated as one wrapped message.
+    """
+    bubbles: list[dict] = []
+    for line in sorted(texts, key=lambda t: t.top):
+        side = _line_side(line, frame_width)
+        line_height = line.bottom - line.top
+        prev = bubbles[-1] if bubbles else None
+        if (
+            prev is not None
+            and side == prev["side"]
+            and line.top - prev["bottom"] < line_height * BUBBLE_MAX_GAP_FACTOR
+        ):
+            prev["parts"].append(line.text)
+            prev["confs"].append(line.confidence)
+            prev["bottom"] = max(prev["bottom"], line.bottom)
+            continue
+        bubbles.append(
+            {
+                "parts": [line.text],
+                "confs": [line.confidence],
+                "side": side,
+                "top": line.top,
+                "bottom": line.bottom,
+            }
+        )
+    return [
+        {
+            "text": " ".join(b["parts"]),
+            "senderHint": b["side"],
+            "confidence": round(sum(b["confs"]) / len(b["confs"]), 3),
+            "top": b["top"],
+        }
+        for b in bubbles
+    ]
+
+
+def _normalize(text: str) -> str:
+    return " ".join("".join(c.lower() for c in text if c.isalnum() or c.isspace()).split())
+
+
+def _merge_into_transcript(
+    transcript: list[dict], bubbles: list[dict], frame_id: str, timestamp: float
+) -> None:
+    """Fold one frame's bubbles into the running transcript (Iteration 4).
+
+    A bubble matches an existing message when the sender hints are
+    compatible and the normalized texts are near-identical, which absorbs
+    small OCR differences between frames of the same on-screen message.
+    """
+    for bubble in bubbles:
+        normalized = _normalize(bubble["text"])
+        if not normalized:
+            continue
+        match = None
+        for message in transcript:
+            if bubble["senderHint"] != "unknown" != message["senderHint"] and (
+                bubble["senderHint"] != message["senderHint"]
+            ):
+                continue
+            similarity = difflib.SequenceMatcher(None, normalized, message["normalized"]).ratio()
+            if similarity >= MERGE_SIMILARITY_THRESHOLD:
+                match = message
+                break
+        if match is None:
+            transcript.append(
+                {
+                    "text": bubble["text"],
+                    "normalized": normalized,
+                    "senderHint": bubble["senderHint"],
+                    "confidence": bubble["confidence"],
+                    "firstSeenSeconds": timestamp,
+                    "lastSeenSeconds": timestamp,
+                    "evidenceFrameIds": [frame_id],
+                }
+            )
+            continue
+        match["lastSeenSeconds"] = timestamp
+        match["evidenceFrameIds"].append(frame_id)
+        if bubble["confidence"] > match["confidence"]:
+            # Prefer the cleanest OCR reading of this message seen so far.
+            match["text"] = bubble["text"]
+            match["normalized"] = normalized
+            match["confidence"] = bubble["confidence"]
+        if match["senderHint"] == "unknown":
+            match["senderHint"] = bubble["senderHint"]
+
+
 @app.post("/recordings/analyze", response_model=AnalyzeResponse)
 async def analyze_recording(file: UploadFile) -> AnalyzeResponse:
     if not file.filename:
@@ -182,21 +302,30 @@ async def analyze_recording(file: UploadFile) -> AnalyzeResponse:
 
     kept_frames = await asyncio.to_thread(_drop_duplicate_frames, frame_paths)
 
-    frames = [
-        FramePreview(
-            id=path.stem,
-            timestampSeconds=round(index * FRAME_INTERVAL_SECONDS, 3),
-            url=f"/frames/{recording_id}/{path.name}",
-            texts=await asyncio.to_thread(_ocr_frame, path),
+    frames: list[FramePreview] = []
+    transcript: list[dict] = []
+    for index, path in kept_frames:
+        timestamp = round(index * FRAME_INTERVAL_SECONDS, 3)
+        texts = await asyncio.to_thread(_ocr_frame, path)
+        frames.append(
+            FramePreview(
+                id=path.stem,
+                timestampSeconds=timestamp,
+                url=f"/frames/{recording_id}/{path.name}",
+                texts=texts,
+            )
         )
-        for index, path in kept_frames
-    ]
+        with Image.open(path) as img:
+            frame_width = img.width
+        bubbles = _group_bubbles(texts, frame_width)
+        _merge_into_transcript(transcript, bubbles, path.stem, timestamp)
 
     return AnalyzeResponse(
         recordingId=recording_id,
         frameCount=len(frames),
         duplicateFramesDropped=len(frame_paths) - len(frames),
         frames=frames,
+        transcript=[TranscriptMessage(**{k: v for k, v in m.items() if k != "normalized"}) for m in transcript],
     )
 
 

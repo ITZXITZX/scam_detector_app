@@ -56,18 +56,48 @@ class FramePreview {
       );
 }
 
+/// One reconstructed message in the merged conversation transcript.
+class TranscriptMessage {
+  final String text;
+  final String senderHint; // "left", "right", or "unknown"
+  final double confidence;
+  final double firstSeenSeconds;
+  final double lastSeenSeconds;
+  final List<String> evidenceFrameIds;
+
+  TranscriptMessage({
+    required this.text,
+    required this.senderHint,
+    required this.confidence,
+    required this.firstSeenSeconds,
+    required this.lastSeenSeconds,
+    required this.evidenceFrameIds,
+  });
+
+  factory TranscriptMessage.fromJson(Map<String, dynamic> json) => TranscriptMessage(
+        text: json['text'] as String,
+        senderHint: json['senderHint'] as String,
+        confidence: (json['confidence'] as num).toDouble(),
+        firstSeenSeconds: (json['firstSeenSeconds'] as num).toDouble(),
+        lastSeenSeconds: (json['lastSeenSeconds'] as num).toDouble(),
+        evidenceFrameIds: (json['evidenceFrameIds'] as List).cast<String>(),
+      );
+}
+
 /// Result of a `/recordings/analyze` call.
 class AnalyzeResult {
   final String recordingId;
   final int frameCount;
   final int duplicateFramesDropped;
   final List<FramePreview> frames;
+  final List<TranscriptMessage> transcript;
 
   AnalyzeResult({
     required this.recordingId,
     required this.frameCount,
     required this.duplicateFramesDropped,
     required this.frames,
+    required this.transcript,
   });
 
   factory AnalyzeResult.fromJson(Map<String, dynamic> json) => AnalyzeResult(
@@ -76,6 +106,9 @@ class AnalyzeResult {
         duplicateFramesDropped: json['duplicateFramesDropped'] as int? ?? 0,
         frames: (json['frames'] as List)
             .map((e) => FramePreview.fromJson(e as Map<String, dynamic>))
+            .toList(),
+        transcript: (json['transcript'] as List? ?? const [])
+            .map((e) => TranscriptMessage.fromJson(e as Map<String, dynamic>))
             .toList(),
       );
 }

@@ -177,10 +177,50 @@ class _RecordingHomePageState extends State<RecordingHomePage> {
     }
   }
 
+  Widget _buildTranscriptBubble(TranscriptMessage message) {
+    final isRight = message.senderHint == 'right';
+    final isUnknown = message.senderHint == 'unknown';
+    final colorScheme = Theme.of(context).colorScheme;
+    return Align(
+      alignment: isUnknown
+          ? Alignment.center
+          : (isRight ? Alignment.centerRight : Alignment.centerLeft),
+      child: Container(
+        constraints: const BoxConstraints(maxWidth: 280),
+        margin: const EdgeInsets.symmetric(vertical: 3),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        decoration: BoxDecoration(
+          color: isUnknown
+              ? colorScheme.surfaceContainerHighest
+              : (isRight ? colorScheme.primaryContainer : colorScheme.secondaryContainer),
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(message.text),
+            Text(
+              '${(message.confidence * 100).round()}% · '
+              '${message.firstSeenSeconds.toStringAsFixed(1)}s · '
+              '${message.evidenceFrameIds.length} frame${message.evidenceFrameIds.length == 1 ? '' : 's'}',
+              style: Theme.of(context).textTheme.labelSmall,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   Widget _buildFramePreview(AnalyzeResult result) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+    return ListView(
       children: [
+        if (result.transcript.isNotEmpty) ...[
+          Text('Reconstructed conversation', style: Theme.of(context).textTheme.titleMedium),
+          const SizedBox(height: 8),
+          ...result.transcript.map(_buildTranscriptBubble),
+          const SizedBox(height: 24),
+        ],
         Text(
           '${result.frameCount} unique frames'
           '${result.duplicateFramesDropped > 0 ? ' (${result.duplicateFramesDropped} duplicates removed)' : ''}',
