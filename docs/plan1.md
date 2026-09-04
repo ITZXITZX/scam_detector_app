@@ -91,6 +91,11 @@ This is the next implementation step. It tests whether the screen recording pres
 
 ### Iteration 2: Add OCR
 
+**Status:** Implemented as a backend OCR service using `rapidocr` (ONNX models downloaded
+and cached on first use, then run fully offline). A new `POST /recordings/{recordingId}/ocr`
+endpoint OCRs the frames already extracted in Iteration 1 and returns text with bounding
+boxes. The Flutter app adds an "Extract text (OCR)" action after frames are previewed.
+
 **Goal:** Convert frames into text while preserving coordinates.
 
 Possible implementations:
