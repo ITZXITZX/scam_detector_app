@@ -20,10 +20,17 @@ import imageio_ffmpeg
 import pytesseract
 from fastapi import FastAPI, HTTPException, UploadFile
 from fastapi.staticfiles import StaticFiles
+from PIL import Image
 from pydantic import BaseModel
 
 # Frames are extracted every FRAME_INTERVAL_SECONDS seconds.
 FRAME_INTERVAL_SECONDS = 0.5
+# Difference-hash grid size; the hash has DHASH_SIZE^2 bits.
+DHASH_SIZE = 16
+# Consecutive frames whose hashes differ by at most this many bits are
+# considered duplicates (tolerates clock ticks and status-bar noise while
+# still catching a single new chat bubble).
+DUPLICATE_MAX_BIT_DISTANCE = 3
 # Recording directories older than this are deleted by the background sweep.
 RETENTION_SECONDS = 15 * 60
 SWEEP_INTERVAL_SECONDS = 60
@@ -54,6 +61,7 @@ class FramePreview(BaseModel):
 class AnalyzeResponse(BaseModel):
     recordingId: str
     frameCount: int
+    duplicateFramesDropped: int
     frames: list[FramePreview]
 
 
@@ -78,6 +86,38 @@ def _extract_frames(video_path: Path, output_dir: Path) -> list[Path]:
     if result.returncode != 0:
         raise RuntimeError(f"ffmpeg failed: {result.stderr[-2000:]}")
     return sorted(output_dir.glob("frame_*.jpg"))
+
+
+def _dhash(image_path: Path) -> int:
+    """Difference hash: 1 bit per adjacent-pixel brightness comparison."""
+    with Image.open(image_path) as img:
+        small = img.convert("L").resize((DHASH_SIZE + 1, DHASH_SIZE), Image.LANCZOS)
+        pixels = list(small.getdata())
+    bits = 0
+    for row in range(DHASH_SIZE):
+        for col in range(DHASH_SIZE):
+            left = pixels[row * (DHASH_SIZE + 1) + col]
+            right = pixels[row * (DHASH_SIZE + 1) + col + 1]
+            bits = (bits << 1) | (left > right)
+    return bits
+
+
+def _drop_duplicate_frames(frame_paths: list[Path]) -> list[tuple[int, Path]]:
+    """Keep only frames that differ visually from the last kept frame.
+
+    Returns (original_index, path) pairs so timestamps stay accurate;
+    dropped frame files are deleted from disk.
+    """
+    kept: list[tuple[int, Path]] = []
+    last_hash: int | None = None
+    for index, path in enumerate(frame_paths):
+        frame_hash = _dhash(path)
+        if last_hash is not None and (frame_hash ^ last_hash).bit_count() <= DUPLICATE_MAX_BIT_DISTANCE:
+            path.unlink()
+            continue
+        last_hash = frame_hash
+        kept.append((index, path))
+    return kept
 
 
 def _ocr_frame(image_path: Path) -> list[OcrText]:
@@ -140,6 +180,8 @@ async def analyze_recording(file: UploadFile) -> AnalyzeResponse:
         # The source video is only needed for frame extraction, not for preview.
         video_path.unlink(missing_ok=True)
 
+    kept_frames = await asyncio.to_thread(_drop_duplicate_frames, frame_paths)
+
     frames = [
         FramePreview(
             id=path.stem,
@@ -147,10 +189,15 @@ async def analyze_recording(file: UploadFile) -> AnalyzeResponse:
             url=f"/frames/{recording_id}/{path.name}",
             texts=await asyncio.to_thread(_ocr_frame, path),
         )
-        for index, path in enumerate(frame_paths)
+        for index, path in kept_frames
     ]
 
-    return AnalyzeResponse(recordingId=recording_id, frameCount=len(frames), frames=frames)
+    return AnalyzeResponse(
+        recordingId=recording_id,
+        frameCount=len(frames),
+        duplicateFramesDropped=len(frame_paths) - len(frames),
+        frames=frames,
+    )
 
 
 async def _sweep_old_recordings() -> None:

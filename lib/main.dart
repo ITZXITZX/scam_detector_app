@@ -181,7 +181,11 @@ class _RecordingHomePageState extends State<RecordingHomePage> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text('${result.frameCount} frames extracted', style: Theme.of(context).textTheme.titleMedium),
+        Text(
+          '${result.frameCount} unique frames'
+          '${result.duplicateFramesDropped > 0 ? ' (${result.duplicateFramesDropped} duplicates removed)' : ''}',
+          style: Theme.of(context).textTheme.titleMedium,
+        ),
         const SizedBox(height: 8),
         SizedBox(
           // Fixed row height keeps every thumbnail's aspect ratio consistent

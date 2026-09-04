@@ -60,13 +60,20 @@ class FramePreview {
 class AnalyzeResult {
   final String recordingId;
   final int frameCount;
+  final int duplicateFramesDropped;
   final List<FramePreview> frames;
 
-  AnalyzeResult({required this.recordingId, required this.frameCount, required this.frames});
+  AnalyzeResult({
+    required this.recordingId,
+    required this.frameCount,
+    required this.duplicateFramesDropped,
+    required this.frames,
+  });
 
   factory AnalyzeResult.fromJson(Map<String, dynamic> json) => AnalyzeResult(
         recordingId: json['recordingId'] as String,
         frameCount: json['frameCount'] as int,
+        duplicateFramesDropped: json['duplicateFramesDropped'] as int? ?? 0,
         frames: (json['frames'] as List)
             .map((e) => FramePreview.fromJson(e as Map<String, dynamic>))
             .toList(),
