@@ -186,7 +186,7 @@ class _RecordingHomePageState extends State<RecordingHomePage> {
         SizedBox(
           // Fixed row height keeps every thumbnail's aspect ratio consistent
           // instead of stretching to whatever space happens to be left.
-          height: 320,
+          height: 400,
           child: ListView.builder(
             scrollDirection: Axis.horizontal,
             itemCount: result.frames.length,
@@ -214,6 +214,16 @@ class _RecordingHomePageState extends State<RecordingHomePage> {
                     ),
                     const SizedBox(height: 4),
                     Text('${frame.timestampSeconds.toStringAsFixed(1)}s'),
+                    if (frame.texts.isNotEmpty)
+                      SizedBox(
+                        width: 160,
+                        child: Text(
+                          frame.texts.map((t) => t.text).join('\n'),
+                          maxLines: 4,
+                          overflow: TextOverflow.ellipsis,
+                          style: Theme.of(context).textTheme.bodySmall,
+                        ),
+                      ),
                   ],
                 ),
               );

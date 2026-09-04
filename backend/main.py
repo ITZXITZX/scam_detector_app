@@ -1,4 +1,6 @@
-"""Iteration 1 backend: extract preview frames from an uploaded screen recording.
+"""Iteration 2 backend: extract preview frames and OCR them with bounding boxes.
+
+Requires the Tesseract binary on PATH (macOS: `brew install tesseract`).
 
 Run with:
     pip install -r requirements.txt
@@ -15,6 +17,7 @@ import uuid
 from pathlib import Path
 
 import imageio_ffmpeg
+import pytesseract
 from fastapi import FastAPI, HTTPException, UploadFile
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -32,10 +35,20 @@ app = FastAPI(title="Recording Frame Extractor")
 app.mount("/frames", StaticFiles(directory=STORAGE_DIR), name="frames")
 
 
+class OcrText(BaseModel):
+    text: str
+    left: int
+    top: int
+    right: int
+    bottom: int
+    confidence: float
+
+
 class FramePreview(BaseModel):
     id: str
     timestampSeconds: float
     url: str
+    texts: list[OcrText]
 
 
 class AnalyzeResponse(BaseModel):
@@ -67,6 +80,44 @@ def _extract_frames(video_path: Path, output_dir: Path) -> list[Path]:
     return sorted(output_dir.glob("frame_*.jpg"))
 
 
+def _ocr_frame(image_path: Path) -> list[OcrText]:
+    """Recognize text in one frame, grouped into visual lines with merged boxes."""
+    data = pytesseract.image_to_data(str(image_path), output_type=pytesseract.Output.DICT)
+
+    lines: dict[tuple[int, int, int], dict] = {}
+    for i, raw_word in enumerate(data["text"]):
+        word = raw_word.strip()
+        confidence = float(data["conf"][i])
+        # Tesseract emits structural rows (blocks/paragraphs) with conf -1.
+        if not word or confidence < 0:
+            continue
+        key = (data["block_num"][i], data["par_num"][i], data["line_num"][i])
+        left, top = data["left"][i], data["top"][i]
+        right, bottom = left + data["width"][i], top + data["height"][i]
+        line = lines.setdefault(
+            key,
+            {"words": [], "confs": [], "left": left, "top": top, "right": right, "bottom": bottom},
+        )
+        line["words"].append(word)
+        line["confs"].append(confidence)
+        line["left"] = min(line["left"], left)
+        line["top"] = min(line["top"], top)
+        line["right"] = max(line["right"], right)
+        line["bottom"] = max(line["bottom"], bottom)
+
+    return [
+        OcrText(
+            text=" ".join(line["words"]),
+            left=line["left"],
+            top=line["top"],
+            right=line["right"],
+            bottom=line["bottom"],
+            confidence=round(sum(line["confs"]) / len(line["confs"]) / 100, 3),
+        )
+        for _, line in sorted(lines.items())
+    ]
+
+
 @app.post("/recordings/analyze", response_model=AnalyzeResponse)
 async def analyze_recording(file: UploadFile) -> AnalyzeResponse:
     if not file.filename:
@@ -94,6 +145,7 @@ async def analyze_recording(file: UploadFile) -> AnalyzeResponse:
             id=path.stem,
             timestampSeconds=round(index * FRAME_INTERVAL_SECONDS, 3),
             url=f"/frames/{recording_id}/{path.name}",
+            texts=await asyncio.to_thread(_ocr_frame, path),
         )
         for index, path in enumerate(frame_paths)
     ]
