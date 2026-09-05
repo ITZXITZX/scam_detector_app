@@ -1,0 +1,126 @@
+"""The vocabulary the whole system agrees on.
+
+Three separate things depend on this list matching exactly: the prompt that asks
+Claude to label a conversation, the checks that read those labels, and the
+profile that counts them over time. Keeping it in one place means a typo is an
+ImportError rather than a condition that silently never matches.
+
+Every field is a closed enum. A value outside the enum is a bug, not a new
+category: scoring is a lookup, and a lookup cannot handle a label it has never
+seen.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from enum import Enum
+
+
+class LureType(str, Enum):
+    """What the scam is pretending to be about."""
+
+    AUTHORITY = "authority"  # police, bank, government, tax
+    INVESTMENT = "investment"
+    ROMANCE = "romance"
+    PARCEL = "parcel"
+    JOB = "job"
+    LOTTERY = "lottery"
+    TECH_SUPPORT = "tech_support"
+    ECOMMERCE = "ecommerce"
+    IMPERSONATION_KNOWN_PERSON = "impersonation_known_person"
+    OTHER = "other"
+    NONE = "none"
+
+
+class PressureTactic(str, Enum):
+    """How the other party is pushing the user toward acting."""
+
+    URGENCY = "urgency"
+    SECRECY = "secrecy"
+    THREAT = "threat"
+    ISOLATION = "isolation"  # "don't tell your family"
+    FLATTERY = "flattery"
+    RECIPROCITY = "reciprocity"
+    AUTHORITY_CLAIM = "authority_claim"
+
+
+class RequestedAction(str, Enum):
+    """What the other party is asking the user to actually do."""
+
+    TRANSFER_MONEY = "transfer_money"
+    SHARE_CREDENTIALS = "share_credentials"
+    SHARE_OTP = "share_otp"
+    SHARE_ID_DOCUMENT = "share_id_document"
+    INSTALL_APP = "install_app"
+    CLICK_LINK = "click_link"
+    BUY_GIFTCARD = "buy_giftcard"
+    MEET_IN_PERSON = "meet_in_person"
+    NONE = "none"
+
+
+class ClaimedIdentity(str, Enum):
+    """Who the other party says they are. Claimed, never verified."""
+
+    POLICE = "police"
+    BANK = "bank"
+    GOVERNMENT = "government"
+    COURIER = "courier"
+    PLATFORM_SUPPORT = "platform_support"
+    KNOWN_PERSON = "known_person"
+    STRANGER = "stranger"
+    NONE = "none"
+
+
+class Channel(str, Enum):
+    """Which app the conversation is happening in, read from the screenshot."""
+
+    WHATSAPP = "whatsapp"
+    TELEGRAM = "telegram"
+    SMS = "sms"
+    WECHAT = "wechat"
+    FACEBOOK = "facebook"
+    INSTAGRAM = "instagram"
+    UNKNOWN = "unknown"
+
+
+class EngagementDepth(str, Enum):
+    """How far the user went before checking.
+
+    Ordered least to most exposed. Workflow B weights recent encounters by this:
+    someone who nearly transferred money counts for more than someone who
+    checked before replying.
+    """
+
+    NO_REPLY = "no_reply"
+    REPLIED = "replied"
+    SHARED_PERSONAL_INFO = "shared_personal_info"
+    SHARED_CREDENTIALS = "shared_credentials"
+    INITIATED_PAYMENT = "initiated_payment"
+
+
+# Identities whose real presence would always be on an official domain. Used by
+# the check that catches "claims to be the police, links somewhere that isn't".
+AUTHORITY_IDENTITIES = frozenset(
+    {ClaimedIdentity.POLICE, ClaimedIdentity.BANK, ClaimedIdentity.GOVERNMENT}
+)
+
+
+@dataclass(frozen=True)
+class Signals:
+    """One conversation, labelled. The only input the deterministic checks get.
+
+    Deliberately not the transcript: checks read structured labels so that the
+    same conversation always produces the same verdict, and so a scam message
+    cannot influence a check by what it says.
+    """
+
+    lureType: LureType = LureType.NONE
+    pressureTactics: tuple[PressureTactic, ...] = ()
+    requestedAction: RequestedAction = RequestedAction.NONE
+    claimedIdentity: ClaimedIdentity = ClaimedIdentity.NONE
+    channel: Channel = Channel.UNKNOWN
+    engagementDepth: EngagementDepth = EngagementDepth.NO_REPLY
+    urls: tuple[str, ...] = field(default_factory=tuple)
+
+    def claims_authority(self) -> bool:
+        return self.claimedIdentity in AUTHORITY_IDENTITIES
