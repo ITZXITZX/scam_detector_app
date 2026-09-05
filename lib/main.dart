@@ -361,7 +361,6 @@ class _RecordingHomePageState extends State<RecordingHomePage> {
           children: [
             Text(flagged ? '🚩 ${message.text}' : message.text),
             Text(
-              '${(message.confidence * 100).round()}% · '
               '${message.firstSeenSeconds.toStringAsFixed(1)}s · '
               '${message.evidenceFrameIds.length} frame${message.evidenceFrameIds.length == 1 ? '' : 's'}',
               style: Theme.of(context).textTheme.labelSmall,
