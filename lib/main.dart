@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show rootBundle;
 import 'package:flutter_screen_recording/flutter_screen_recording.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:permission_handler/permission_handler.dart';
 
 import 'recording_frames_api.dart';
@@ -28,7 +29,7 @@ class ScamDetectorApp extends StatelessWidget {
   }
 }
 
-enum _Stage { idle, recording, recorded, uploading, done }
+enum _Stage { idle, recording, recorded, uploading, framesReady, analysing, done }
 
 class RecordingHomePage extends StatefulWidget {
   const RecordingHomePage({super.key});
@@ -41,10 +42,8 @@ class _RecordingHomePageState extends State<RecordingHomePage> {
   _Stage _stage = _Stage.idle;
   String? _recordingPath;
   String? _errorMessage;
+  FramesResult? _frames;
   AnalyzeResult? _result;
-  OCRResult? _ocrResult;
-  bool _ocrLoading = false;
-  String? _ocrError;
 
   Future<bool> _ensurePermissions() async {
     // Android 13+ requires explicit notification permission for the
@@ -96,15 +95,62 @@ class _RecordingHomePageState extends State<RecordingHomePage> {
     });
 
     try {
-      final result = await RecordingFramesApi.analyzeRecording(File(_recordingPath!));
+      final frames = await RecordingFramesApi.createRecordingFromVideo(File(_recordingPath!));
+      setState(() {
+        _stage = _Stage.framesReady;
+        _frames = frames;
+      });
+    } catch (err) {
+      setState(() {
+        _stage = _Stage.recorded;
+        _errorMessage = 'Processing failed: $err';
+      });
+    }
+  }
+
+  /// Step 2, and the only step that spends API calls, so the user triggers it
+  /// after seeing which frames were actually captured.
+  Future<void> _analyseConversation() async {
+    final recordingId = _frames?.recordingId;
+    if (recordingId == null) return;
+    setState(() {
+      _stage = _Stage.analysing;
+      _errorMessage = null;
+    });
+
+    try {
+      final result = await RecordingFramesApi.analyzeRecording(recordingId);
       setState(() {
         _stage = _Stage.done;
         _result = result;
       });
     } catch (err) {
       setState(() {
-        _stage = _Stage.recorded;
-        _errorMessage = 'Processing failed: $err';
+        _stage = _Stage.framesReady;
+        _errorMessage = 'Analysis failed: $err';
+      });
+    }
+  }
+
+  /// Alternative to recording: analyse screenshots already on the phone.
+  Future<void> _uploadImages() async {
+    setState(() => _errorMessage = null);
+    final picked = await ImagePicker().pickMultiImage();
+    if (picked.isEmpty) return;
+
+    setState(() => _stage = _Stage.uploading);
+    try {
+      final frames = await RecordingFramesApi.createRecordingFromImages(
+        picked.map((x) => File(x.path)).toList(),
+      );
+      setState(() {
+        _stage = _Stage.framesReady;
+        _frames = frames;
+      });
+    } catch (err) {
+      setState(() {
+        _stage = _Stage.idle;
+        _errorMessage = 'Upload failed: $err';
       });
     }
   }
@@ -133,33 +179,10 @@ class _RecordingHomePageState extends State<RecordingHomePage> {
     setState(() {
       _stage = _Stage.idle;
       _recordingPath = null;
+      _frames = null;
       _result = null;
       _errorMessage = null;
-      _ocrResult = null;
-      _ocrLoading = false;
-      _ocrError = null;
     });
-  }
-
-  Future<void> _runOcr() async {
-    if (_result == null) return;
-    setState(() {
-      _ocrLoading = true;
-      _ocrError = null;
-    });
-
-    try {
-      final ocrResult = await RecordingFramesApi.runOcr(_result!.recordingId);
-      setState(() {
-        _ocrResult = ocrResult;
-        _ocrLoading = false;
-      });
-    } catch (err) {
-      setState(() {
-        _ocrLoading = false;
-        _ocrError = 'OCR failed: $err';
-      });
-    }
   }
 
   @override
@@ -177,7 +200,7 @@ class _RecordingHomePageState extends State<RecordingHomePage> {
               Text(_errorMessage!, style: const TextStyle(color: Colors.red)),
             ],
             const SizedBox(height: 24),
-            if (_result != null) Expanded(child: _buildFramePreview(_result!)),
+            if (_frames != null) Expanded(child: _buildResults(_frames!, _result)),
           ],
         ),
       ),
@@ -198,6 +221,12 @@ class _RecordingHomePageState extends State<RecordingHomePage> {
             // Test affordance: runs the analyze pipeline on a bundled sample
             // recording, so it can be exercised without recording first.
             // TODO: wrap in `if (kDebugMode)` before shipping a release build.
+            const SizedBox(height: 8),
+            OutlinedButton.icon(
+              onPressed: _uploadImages,
+              icon: const Icon(Icons.photo_library_outlined),
+              label: const Text('Upload images'),
+            ),
             const SizedBox(height: 8),
             OutlinedButton.icon(
               onPressed: _useSampleRecording,
@@ -231,7 +260,29 @@ class _RecordingHomePageState extends State<RecordingHomePage> {
           children: [
             SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2)),
             SizedBox(width: 12),
-            Text('Extracting frames & analyzing conversation...'),
+            Text('Extracting frames...'),
+          ],
+        );
+      case _Stage.framesReady:
+        return Row(
+          children: [
+            Expanded(
+              child: ElevatedButton.icon(
+                onPressed: _analyseConversation,
+                icon: const Icon(Icons.auto_awesome),
+                label: const Text('Analyse conversation'),
+              ),
+            ),
+            const SizedBox(width: 8),
+            TextButton(onPressed: _reset, child: const Text('Discard')),
+          ],
+        );
+      case _Stage.analysing:
+        return const Row(
+          children: [
+            SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2)),
+            SizedBox(width: 12),
+            Text('Reading conversation & assessing risk...'),
           ],
         );
       case _Stage.done:
@@ -321,12 +372,12 @@ class _RecordingHomePageState extends State<RecordingHomePage> {
     );
   }
 
-  Widget _buildFramePreview(AnalyzeResult result) {
-    final flagged = result.analysis?.flaggedMessageIndexes.toSet() ?? const <int>{};
+  Widget _buildResults(FramesResult frames, AnalyzeResult? result) {
+    final flagged = result?.analysis?.flaggedMessageIndexes.toSet() ?? const <int>{};
     return ListView(
       children: [
-        if (result.analysis != null) _buildRiskBanner(result.analysis!),
-        if (result.transcript.isNotEmpty) ...[
+        if (result?.analysis != null) _buildRiskBanner(result!.analysis!),
+        if (result != null && result.transcript.isNotEmpty) ...[
           Text('Reconstructed conversation', style: Theme.of(context).textTheme.titleMedium),
           const SizedBox(height: 8),
           for (final (index, message) in result.transcript.indexed)
@@ -334,8 +385,8 @@ class _RecordingHomePageState extends State<RecordingHomePage> {
           const SizedBox(height: 24),
         ],
         Text(
-          '${result.frameCount} unique frames'
-          '${result.duplicateFramesDropped > 0 ? ' (${result.duplicateFramesDropped} duplicates removed)' : ''}',
+          '${frames.frameCount} unique frames'
+          '${frames.duplicateFramesDropped > 0 ? ' (${frames.duplicateFramesDropped} duplicates removed)' : ''}',
           style: Theme.of(context).textTheme.titleMedium,
         ),
         const SizedBox(height: 8),
@@ -345,9 +396,9 @@ class _RecordingHomePageState extends State<RecordingHomePage> {
           height: 400,
           child: ListView.builder(
             scrollDirection: Axis.horizontal,
-            itemCount: result.frames.length,
+            itemCount: frames.frames.length,
             itemBuilder: (context, index) {
-              final frame = result.frames[index];
+              final frame = frames.frames[index];
               return Padding(
                 padding: const EdgeInsets.only(right: 8),
                 child: Column(
@@ -370,80 +421,13 @@ class _RecordingHomePageState extends State<RecordingHomePage> {
                     ),
                     const SizedBox(height: 4),
                     Text('${frame.timestampSeconds.toStringAsFixed(1)}s'),
-                    if (frame.texts.isNotEmpty)
-                      SizedBox(
-                        width: 160,
-                        child: Text(
-                          frame.texts.map((t) => t.text).join('\n'),
-                          maxLines: 4,
-                          overflow: TextOverflow.ellipsis,
-                          style: Theme.of(context).textTheme.bodySmall,
-                        ),
-                      ),
                   ],
                 ),
               );
             },
           ),
         ),
-        const SizedBox(height: 16),
-        Expanded(child: _buildOcrSection()),
       ],
-    );
-  }
-
-  Widget _buildOcrSection() {
-    if (_ocrLoading) {
-      return const Row(
-        children: [
-          SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2)),
-          SizedBox(width: 12),
-          Text('Running OCR...'),
-        ],
-      );
-    }
-
-    if (_ocrError != null) {
-      return Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Text(_ocrError!, style: const TextStyle(color: Colors.red)),
-          const SizedBox(height: 8),
-          ElevatedButton.icon(
-            onPressed: _runOcr,
-            icon: const Icon(Icons.text_fields),
-            label: const Text('Retry OCR'),
-          ),
-        ],
-      );
-    }
-
-    if (_ocrResult == null) {
-      return ElevatedButton.icon(
-        onPressed: _runOcr,
-        icon: const Icon(Icons.text_fields),
-        label: const Text('Extract text (OCR)'),
-      );
-    }
-
-    return ListView.builder(
-      itemCount: _ocrResult!.frames.length,
-      itemBuilder: (context, index) {
-        final frame = _ocrResult!.frames[index];
-        if (frame.texts.isEmpty) return const SizedBox.shrink();
-        return Padding(
-          padding: const EdgeInsets.only(bottom: 12),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(frame.frameId, style: Theme.of(context).textTheme.labelLarge),
-              for (final text in frame.texts)
-                Text('  "${text.text}"  (${(text.confidence * 100).toStringAsFixed(0)}%)'),
-            ],
-          ),
-        );
-      },
     );
   }
 }
