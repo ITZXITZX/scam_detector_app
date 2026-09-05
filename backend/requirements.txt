@@ -2,8 +2,8 @@ fastapi==0.115.6
 uvicorn[standard]==0.32.1
 python-multipart==0.0.19
 imageio-ffmpeg==0.6.0
-pytesseract==0.3.13
 pillow>=10.0
 anthropic>=1.0
 rapidocr==3.9.2
 onnxruntime==1.29.0
+python-dotenv>=1.0

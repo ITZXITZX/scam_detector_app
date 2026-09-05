@@ -44,6 +44,9 @@ dependencies:
   gal: ^2.3.3
   permission_handler: ^11.3.1
   http: ^1.2.2
+  # Lets the user analyse screenshots already on the phone, instead of
+  # recording the screen.
+  image_picker: ^1.1.2
 
 dev_dependencies:
   flutter_test:
@@ -66,6 +69,11 @@ flutter:
   # included with your application, so that you can use the icons in
   # the material Icons class.
   uses-material-design: true
+
+  # Sample screen recording used by the debug-only "Use sample recording"
+  # button, so the analyze pipeline can be exercised without recording.
+  assets:
+    - assets/sample/authority-scam-01.mp4
 
   # To add assets to your application, add an assets section, like this:
   # assets:

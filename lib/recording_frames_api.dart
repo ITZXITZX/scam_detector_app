@@ -4,55 +4,22 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 
-/// One line of text recognized in a frame, with its bounding box.
-class OcrText {
-  final String text;
-  final int left;
-  final int top;
-  final int right;
-  final int bottom;
-  final double confidence;
-
-  OcrText({
-    required this.text,
-    required this.left,
-    required this.top,
-    required this.right,
-    required this.bottom,
-    required this.confidence,
-  });
-
-  factory OcrText.fromJson(Map<String, dynamic> json) => OcrText(
-        text: json['text'] as String,
-        left: json['left'] as int,
-        top: json['top'] as int,
-        right: json['right'] as int,
-        bottom: json['bottom'] as int,
-        confidence: (json['confidence'] as num).toDouble(),
-      );
-}
-
 /// One extracted preview frame returned by the backend.
 class FramePreview {
   final String id;
   final double timestampSeconds;
   final String url;
-  final List<OcrText> texts;
 
   FramePreview({
     required this.id,
     required this.timestampSeconds,
     required this.url,
-    required this.texts,
   });
 
   factory FramePreview.fromJson(Map<String, dynamic> json) => FramePreview(
         id: json['id'] as String,
         timestampSeconds: (json['timestampSeconds'] as num).toDouble(),
         url: json['url'] as String,
-        texts: (json['texts'] as List? ?? const [])
-            .map((e) => OcrText.fromJson(e as Map<String, dynamic>))
-            .toList(),
       );
 }
 
@@ -109,31 +76,44 @@ class ScamAnalysis {
       );
 }
 
-/// Result of a `/recordings/analyze` call.
-class AnalyzeResult {
+/// Result of turning an upload into stored frames. No AI has run yet.
+class FramesResult {
   final String recordingId;
   final int frameCount;
   final int duplicateFramesDropped;
   final List<FramePreview> frames;
-  final List<TranscriptMessage> transcript;
-  final ScamAnalysis? analysis;
 
-  AnalyzeResult({
+  FramesResult({
     required this.recordingId,
     required this.frameCount,
     required this.duplicateFramesDropped,
     required this.frames,
-    required this.transcript,
-    required this.analysis,
   });
 
-  factory AnalyzeResult.fromJson(Map<String, dynamic> json) => AnalyzeResult(
+  factory FramesResult.fromJson(Map<String, dynamic> json) => FramesResult(
         recordingId: json['recordingId'] as String,
         frameCount: json['frameCount'] as int,
         duplicateFramesDropped: json['duplicateFramesDropped'] as int? ?? 0,
         frames: (json['frames'] as List)
             .map((e) => FramePreview.fromJson(e as Map<String, dynamic>))
             .toList(),
+      );
+}
+
+/// Result of running Claude over an existing recording's frames.
+class AnalyzeResult {
+  final String recordingId;
+  final List<TranscriptMessage> transcript;
+  final ScamAnalysis? analysis;
+
+  AnalyzeResult({
+    required this.recordingId,
+    required this.transcript,
+    required this.analysis,
+  });
+
+  factory AnalyzeResult.fromJson(Map<String, dynamic> json) => AnalyzeResult(
+        recordingId: json['recordingId'] as String,
         transcript: (json['transcript'] as List? ?? const [])
             .map((e) => TranscriptMessage.fromJson(e as Map<String, dynamic>))
             .toList(),
@@ -211,11 +191,37 @@ class RecordingFramesApi {
 
   static String resolveFrameUrl(String relativeUrl) => '$baseUrl$relativeUrl';
 
-  static Future<AnalyzeResult> analyzeRecording(File videoFile) async {
-    final uri = Uri.parse('$baseUrl/recordings/analyze');
+  /// Step 1a: turn a screen recording into deduplicated frames. No AI runs.
+  static Future<FramesResult> createRecordingFromVideo(File videoFile) async {
+    final uri = Uri.parse('$baseUrl/recordings/frames');
     final request = http.MultipartRequest('POST', uri)
       ..files.add(await http.MultipartFile.fromPath('file', videoFile.path));
+    return FramesResult.fromJson(await _send(request));
+  }
 
+  /// Step 1b: same, but from images the user picked instead of a recording.
+  static Future<FramesResult> createRecordingFromImages(List<File> images) async {
+    final uri = Uri.parse('$baseUrl/recordings/images');
+    final request = http.MultipartRequest('POST', uri);
+    for (final image in images) {
+      request.files.add(await http.MultipartFile.fromPath('files', image.path));
+    }
+    return FramesResult.fromJson(await _send(request));
+  }
+
+  /// Step 2: read the conversation out of stored frames and judge scam risk.
+  static Future<AnalyzeResult> analyzeRecording(String recordingId) async {
+    final uri = Uri.parse('$baseUrl/recordings/$recordingId/analyze');
+    final response = await http.post(uri);
+
+    if (response.statusCode != 200) {
+      throw Exception('Backend returned ${response.statusCode}: ${response.body}');
+    }
+
+    return AnalyzeResult.fromJson(jsonDecode(response.body) as Map<String, dynamic>);
+  }
+
+  static Future<Map<String, dynamic>> _send(http.MultipartRequest request) async {
     final streamedResponse = await request.send();
     final response = await http.Response.fromStream(streamedResponse);
 
@@ -223,7 +229,7 @@ class RecordingFramesApi {
       throw Exception('Backend returned ${response.statusCode}: ${response.body}');
     }
 
-    return AnalyzeResult.fromJson(jsonDecode(response.body) as Map<String, dynamic>);
+    return jsonDecode(response.body) as Map<String, dynamic>;
   }
 
   static Future<OCRResult> runOcr(String recordingId) async {
