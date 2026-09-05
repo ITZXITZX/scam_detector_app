@@ -78,20 +78,10 @@ app = FastAPI(title="Recording Frame Extractor")
 app.mount("/frames", StaticFiles(directory=STORAGE_DIR), name="frames")
 
 
-class OcrText(BaseModel):
-    text: str
-    left: int
-    top: int
-    right: int
-    bottom: int
-    confidence: float
-
-
 class FramePreview(BaseModel):
     id: str
     timestampSeconds: float
     url: str
-    texts: list[OcrText]
 
 
 class TranscriptMessage(BaseModel):
@@ -111,11 +101,19 @@ class ScamAnalysis(BaseModel):
     warnings: list[str]
 
 
-class AnalyzeResponse(BaseModel):
+class FramesResponse(BaseModel):
+    """Result of turning an upload into stored frames. No AI has run yet."""
+
     recordingId: str
     frameCount: int
     duplicateFramesDropped: int
     frames: list[FramePreview]
+
+
+class AnalyzeResponse(BaseModel):
+    """Result of running Claude over an existing recording's frames."""
+
+    recordingId: str
     transcript: list[TranscriptMessage]
     analysis: ScamAnalysis
 
@@ -392,8 +390,38 @@ def _run_llm_analysis(transcript: list[dict]) -> tuple[ScamAnalysis, dict[int, s
     return analysis, corrections
 
 
-@app.post("/recordings/analyze", response_model=AnalyzeResponse)
-async def analyze_recording(file: UploadFile) -> AnalyzeResponse:
+def _frame_metadata_path(recording_dir: Path) -> Path:
+    return recording_dir / "frames.json"
+
+
+def _store_frames(
+    recording_id: str, recording_dir: Path, kept: list[tuple[int, Path]], dropped: int
+) -> FramesResponse:
+    """Persist frame timestamps and build the frames response.
+
+    Timestamps are written to disk because /analyze runs later, as a separate
+    request, and cannot recover the pre-dedup frame index from filenames alone.
+    """
+    timestamps = {path.name: round(index * FRAME_INTERVAL_SECONDS, 3) for index, path in kept}
+    _frame_metadata_path(recording_dir).write_text(json.dumps(timestamps), encoding="utf-8")
+    return FramesResponse(
+        recordingId=recording_id,
+        frameCount=len(kept),
+        duplicateFramesDropped=dropped,
+        frames=[
+            FramePreview(
+                id=path.stem,
+                timestampSeconds=timestamps[path.name],
+                url=f"/frames/{recording_id}/{path.name}",
+            )
+            for _, path in kept
+        ],
+    )
+
+
+@app.post("/recordings/frames", response_model=FramesResponse)
+async def create_recording_from_video(file: UploadFile) -> FramesResponse:
+    """Turn an uploaded screen recording into deduplicated frames. No AI."""
     if not file.filename:
         raise HTTPException(status_code=400, detail="No file uploaded")
 
@@ -414,33 +442,77 @@ async def analyze_recording(file: UploadFile) -> AnalyzeResponse:
         # The source video is only needed for frame extraction, not for preview.
         video_path.unlink(missing_ok=True)
 
-    kept_frames = await asyncio.to_thread(_drop_duplicate_frames, frame_paths)
+    kept = await asyncio.to_thread(_drop_duplicate_frames, frame_paths)
+    return _store_frames(recording_id, recording_dir, kept, len(frame_paths) - len(kept))
 
-    # `texts` stays empty: the transcript now comes from Claude reading the
-    # frames directly, which returns no per-line bounding boxes. The separate
-    # /recordings/{id}/ocr endpoint still exposes raw OCR with boxes.
-    frames = [
-        FramePreview(
-            id=path.stem,
-            timestampSeconds=round(index * FRAME_INTERVAL_SECONDS, 3),
-            url=f"/frames/{recording_id}/{path.name}",
-            texts=[],
+
+@app.post("/recordings/images", response_model=FramesResponse)
+async def create_recording_from_images(files: list[UploadFile]) -> FramesResponse:
+    """Same as /recordings/frames but the caller supplies the images directly.
+
+    Screenshots are treated as an ordered sequence, so `timestampSeconds` is a
+    position in that sequence rather than a real time. Dedup still runs, since
+    screenshots of one conversation usually overlap.
+    """
+    if not files:
+        raise HTTPException(status_code=400, detail="No images uploaded")
+
+    recording_id = uuid.uuid4().hex[:12]
+    recording_dir = STORAGE_DIR / recording_id
+    recording_dir.mkdir(parents=True)
+
+    frame_paths: list[Path] = []
+    try:
+        for position, upload in enumerate(files, start=1):
+            path = recording_dir / f"frame_{position:04d}.jpg"
+            with Image.open(upload.file) as img:
+                img.convert("RGB").save(path, "JPEG", quality=90)
+            frame_paths.append(path)
+    except Exception as exc:
+        shutil.rmtree(recording_dir, ignore_errors=True)
+        raise HTTPException(status_code=422, detail=f"Could not read images: {exc}") from exc
+
+    kept = await asyncio.to_thread(_drop_duplicate_frames, frame_paths)
+    return _store_frames(recording_id, recording_dir, kept, len(frame_paths) - len(kept))
+
+
+@app.post("/recordings/{recording_id}/analyze", response_model=AnalyzeResponse)
+async def analyze_recording(recording_id: str) -> AnalyzeResponse:
+    """Read the conversation out of stored frames and judge scam risk."""
+    if not _RECORDING_ID_PATTERN.match(recording_id):
+        raise HTTPException(status_code=400, detail="Invalid recording id")
+
+    recording_dir = STORAGE_DIR / recording_id
+    if not recording_dir.is_dir():
+        raise HTTPException(
+            status_code=404,
+            detail="Recording not found. Frames are deleted 15 minutes after upload.",
         )
-        for index, path in kept_frames
+
+    frame_paths = sorted(recording_dir.glob("frame_*.jpg"))
+    if not frame_paths:
+        raise HTTPException(status_code=404, detail="No frames for this recording")
+
+    metadata_path = _frame_metadata_path(recording_dir)
+    timestamps: dict[str, float] = {}
+    if metadata_path.exists():
+        timestamps = json.loads(metadata_path.read_text(encoding="utf-8"))
+
+    # Rebuild the (index, path) pairs _extract_transcript expects, recovering
+    # each frame's original position from the stored timestamps.
+    kept = [
+        (int(round(timestamps.get(path.name, i * FRAME_INTERVAL_SECONDS) / FRAME_INTERVAL_SECONDS)), path)
+        for i, path in enumerate(frame_paths)
     ]
 
-    transcript = await asyncio.to_thread(_extract_transcript, kept_frames)
-
+    transcript = await asyncio.to_thread(_extract_transcript, kept)
     analysis, corrections = await asyncio.to_thread(_run_llm_analysis, transcript)
     for i, corrected_text in corrections.items():
         transcript[i]["text"] = corrected_text
 
     return AnalyzeResponse(
         recordingId=recording_id,
-        frameCount=len(frames),
-        duplicateFramesDropped=len(frame_paths) - len(frames),
-        frames=frames,
-        transcript=[TranscriptMessage(**{k: v for k, v in m.items() if k != "normalized"}) for m in transcript],
+        transcript=[TranscriptMessage(**m) for m in transcript],
         analysis=analysis,
     )
 
