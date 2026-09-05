@@ -16,7 +16,7 @@ from dataclasses import dataclass
 from enum import Enum
 
 from .checks import CheckResult, run_checks
-from .taxonomy import LureType, Signals
+from .taxonomy import LureType, ModelSuspicion, Signals
 
 
 class Outcome(str, Enum):
@@ -39,6 +39,17 @@ CHECK_POINTS = {
     "C4": 40,
     "C5": 35,
     "C7": 20,
+    # C11 is scored from the label below rather than a flat value.
+}
+
+# The model's label is capped below SCAM_THRESHOLD on purpose: it can push a
+# conversation over the line alongside anything else, but never decide one on
+# its own. A model that misreads a legitimate conversation should not be able
+# to call it a scam unaided.
+MODEL_SUSPICION_POINTS = {
+    ModelSuspicion.NONE: 0,
+    ModelSuspicion.MODERATE: 20,
+    ModelSuspicion.STRONG: 50,
 }
 
 POINTS_PER_TACTIC = 5
@@ -63,6 +74,7 @@ class Verdict:
 
 def score_signals(signals: Signals, checks: tuple[CheckResult, ...]) -> int:
     total = sum(CHECK_POINTS.get(c.id, 0) for c in checks if c.fired)
+    total += MODEL_SUSPICION_POINTS[signals.modelSuspicion]
     total += min(len(signals.pressureTactics) * POINTS_PER_TACTIC, MAX_TACTIC_POINTS)
     if signals.lureType is not LureType.NONE:
         total += POINTS_FOR_LURE

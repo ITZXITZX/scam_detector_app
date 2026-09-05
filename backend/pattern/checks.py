@@ -13,7 +13,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from .domains import impersonated_brand, is_allowlisted, near_miss_domain, registrable_domain
-from .taxonomy import PressureTactic, RequestedAction, Signals
+from .taxonomy import ModelSuspicion, PressureTactic, RequestedAction, Signals
 
 
 @dataclass(frozen=True)
@@ -137,6 +137,24 @@ def c7_isolation(signals: Signals) -> CheckResult:
     )
 
 
+def c11_model_suspicion(signals: Signals) -> CheckResult:
+    """The model's structural read, as a bounded contribution.
+
+    Exists because the other checks are built around links, and whole scam
+    families do not use one: an advance-fee approach with no URL fires nothing
+    above and scores 15. This is the lever that lets the model raise a concern
+    the structural checks cannot see.
+
+    Scored, not decisive. It cannot reach the threshold alone, and nothing here
+    can lower a verdict - a fired domain check stands regardless of what the
+    model thinks.
+    """
+    if signals.modelSuspicion is ModelSuspicion.NONE:
+        return CheckResult("C11", False)
+    reason = signals.modelSuspicionReason.strip() or "no reason given"
+    return CheckResult("C11", True, reason)
+
+
 ALL_CHECKS = (
     c1_unofficial_domain,
     c2_authority_claim_unofficial_link,
@@ -144,6 +162,7 @@ ALL_CHECKS = (
     c4_credential_request,
     c5_payment_under_authority,
     c7_isolation,
+    c11_model_suspicion,
 )
 
 

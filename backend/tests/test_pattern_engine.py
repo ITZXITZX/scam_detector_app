@@ -24,6 +24,7 @@ from pattern.scoring import Outcome, decide  # noqa: E402
 from pattern.taxonomy import (  # noqa: E402
     ClaimedIdentity,
     LureType,
+    ModelSuspicion,
     PressureTactic,
     RequestedAction,
     Signals,
@@ -218,3 +219,88 @@ def test_credential_check_reports_every_credential_asked_for():
     )
     detail = next(c.detail for c in verdict.checks if c.id == "C4")
     assert "share otp" in detail and "share credentials" in detail
+
+
+# --------------------------------------------------------------------------
+# C11 - the model's structural read
+# --------------------------------------------------------------------------
+
+
+def test_model_suspicion_alone_cannot_decide_a_verdict():
+    """50 points, threshold 60. The cap is the whole design.
+
+    A model that misreads a legitimate conversation must not be able to call it
+    a scam unaided. It can push something over the line alongside other
+    evidence; it cannot supply all of the evidence itself.
+    """
+    verdict = decide(
+        Signals(
+            modelSuspicion=ModelSuspicion.STRONG,
+            modelSuspicionReason="Says he is your agent, then asks your name",
+        )
+    )
+    assert "C11" in _fired(verdict)
+    assert verdict.score < 60
+    assert verdict.outcome is Outcome.COULDNT_CONFIRM
+
+
+def test_model_suspicion_tips_a_conversation_the_checks_score_low():
+    """The advance-fee case: no link, so every structural check is blind.
+
+    Lure plus one tactic scores 15 on its own, which reads as almost safe for a
+    conversation that is plainly a scam. This is the gap C11 exists to cover.
+    """
+    without = decide(
+        Signals(
+            lureType=LureType.LOTTERY,
+            pressureTactics=(PressureTactic.URGENCY,),
+            claimedIdentity=ClaimedIdentity.STRANGER,
+        )
+    )
+    assert without.score == 15
+    assert without.outcome is Outcome.COULDNT_CONFIRM
+
+    with_model = decide(
+        Signals(
+            lureType=LureType.LOTTERY,
+            pressureTactics=(PressureTactic.URGENCY,),
+            claimedIdentity=ClaimedIdentity.STRANGER,
+            modelSuspicion=ModelSuspicion.STRONG,
+            modelSuspicionReason="Offers a cash delivery you never asked for",
+        )
+    )
+    assert with_model.outcome is Outcome.SCAM
+
+
+def test_model_suspicion_cannot_lower_a_verdict():
+    """Escalate-only. A fired domain check stands whatever the model thinks.
+
+    Rule 1's asymmetry: a false alarm is an annoyance, a false reassurance is
+    the mistake that costs someone their savings.
+    """
+    signals = dict(
+        claimedIdentity=ClaimedIdentity.POLICE,
+        urls=("https://mas-verify.sg-alert.test/case/1",),
+    )
+    assert decide(Signals(**signals)).outcome is Outcome.SCAM
+    assert (
+        decide(Signals(**signals, modelSuspicion=ModelSuspicion.NONE)).outcome
+        is Outcome.SCAM
+    )
+
+
+def test_model_suspicion_reason_is_surfaced():
+    """A fired check has to say what it saw, or the verdict cannot explain itself."""
+    verdict = decide(
+        Signals(
+            modelSuspicion=ModelSuspicion.MODERATE,
+            modelSuspicionReason="Asks for payment in gift cards",
+        )
+    )
+    assert "Asks for payment in gift cards" in verdict.reasons
+
+
+def test_model_suspicion_without_a_reason_still_says_something():
+    verdict = decide(Signals(modelSuspicion=ModelSuspicion.STRONG))
+    assert "C11" in _fired(verdict)
+    assert verdict.reasons  # never an empty explanation

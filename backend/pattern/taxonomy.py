@@ -77,6 +77,23 @@ class ClaimedIdentity(str, Enum):
     NONE = "none"
 
 
+class ModelSuspicion(str, Enum):
+    """The model's structural read of the conversation.
+
+    A label rather than a number, because a number the model chooses cannot be
+    reproduced or explained - the reason this engine exists. Three options
+    against a written rubric can at least be checked for stability: run the same
+    conversation repeatedly and see whether the label moves.
+
+    It feeds a scored check like any other signal, capped so it cannot decide a
+    verdict alone, and it can only raise a verdict, never lower one.
+    """
+
+    NONE = "none"
+    MODERATE = "moderate"
+    STRONG = "strong"
+
+
 class Channel(str, Enum):
     """Which app the conversation is happening in, read from the screenshot."""
 
@@ -127,6 +144,8 @@ class Signals:
     channel: Channel = Channel.UNKNOWN
     engagementDepth: EngagementDepth = EngagementDepth.NO_REPLY
     urls: tuple[str, ...] = field(default_factory=tuple)
+    modelSuspicion: ModelSuspicion = ModelSuspicion.NONE
+    modelSuspicionReason: str = ""
 
     def claims_authority(self) -> bool:
         return self.claimedIdentity in AUTHORITY_IDENTITIES
