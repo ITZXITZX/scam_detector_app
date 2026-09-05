@@ -27,6 +27,7 @@ import subprocess
 import threading
 import time
 import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
@@ -49,6 +50,8 @@ from pattern.taxonomy import (
     RequestedAction,
     Signals,
 )
+from profile.model import Encounter
+from profile.store import get_profile, record_encounter
 
 if TYPE_CHECKING:
     from rapidocr import RapidOCR
@@ -145,6 +148,18 @@ class CheckOutcome(BaseModel):
     id: str
     fired: bool
     detail: str
+
+
+class ProfileSummary(BaseModel):
+    """A user's risk shape: what they are vulnerable to, never what they said."""
+
+    userId: str
+    encounterCount: int
+    vulnerability: dict[str, float]
+    tacticSensitivity: dict[str, float]
+    channels: dict[str, int]
+    topLure: str | None
+    usualChannel: str | None
 
 
 class VerdictSummary(BaseModel):
@@ -636,8 +651,14 @@ async def create_recording_from_images(files: list[UploadFile]) -> FramesRespons
 
 
 @app.post("/recordings/{recording_id}/analyze", response_model=AnalyzeResponse)
-async def analyze_recording(recording_id: str) -> AnalyzeResponse:
-    """Read the conversation out of stored frames and judge scam risk."""
+async def analyze_recording(recording_id: str, userId: str = "") -> AnalyzeResponse:
+    """Read the conversation out of stored frames and judge scam risk.
+
+    When `userId` is supplied the result is recorded against that user's
+    profile. Every analysis is recorded, not only the scams: choosing to check
+    something says what a person finds plausible, and the cases they caught
+    early are what make a vulnerability visibly fade.
+    """
     if not _RECORDING_ID_PATTERN.match(recording_id):
         raise HTTPException(status_code=400, detail="Invalid recording id")
 
@@ -674,6 +695,22 @@ async def analyze_recording(recording_id: str) -> AnalyzeResponse:
     for i, corrected_text in corrections.items():
         transcript[i]["text"] = corrected_text
 
+    if userId:
+        await asyncio.to_thread(
+            record_encounter,
+            Encounter(
+                userId=userId,
+                at=datetime.now(timezone.utc),
+                lureType=signals.lureType,
+                pressureTactics=signals.pressureTactics,
+                channel=signals.channel,
+                engagementDepth=signals.engagementDepth,
+                outcome=verdict.outcome.value,
+                score=verdict.score,
+                recordingId=recording_id,
+            ),
+        )
+
     return AnalyzeResponse(
         recordingId=recording_id,
         transcript=[TranscriptMessage(**m) for m in transcript],
@@ -698,6 +735,25 @@ async def analyze_recording(recording_id: str) -> AnalyzeResponse:
             hardTriggered=list(verdict.hardTriggered),
         ),
         analysis=analysis,
+    )
+
+
+@app.get("/users/{user_id}/profile", response_model=ProfileSummary)
+async def read_profile(user_id: str) -> ProfileSummary:
+    """What this user has turned out to be vulnerable to.
+
+    Derived from their encounters on every read rather than stored, so the decay
+    half-life and depth weights can change without a migration.
+    """
+    profile = await asyncio.to_thread(get_profile, user_id)
+    return ProfileSummary(
+        userId=profile.userId,
+        encounterCount=profile.encounterCount,
+        vulnerability=profile.vulnerability,
+        tacticSensitivity=profile.tacticSensitivity,
+        channels=profile.channels,
+        topLure=profile.top_lure(),
+        usualChannel=profile.usual_channel(),
     )
 
 
