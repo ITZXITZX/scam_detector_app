@@ -1,10 +1,14 @@
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show rootBundle;
 import 'package:flutter_screen_recording/flutter_screen_recording.dart';
 import 'package:permission_handler/permission_handler.dart';
 
 import 'recording_frames_api.dart';
+
+/// Bundled screen recording used by the "Use sample recording" test button.
+const _sampleRecordingAsset = 'assets/sample/authority-scam-01.mp4';
 
 void main() {
   runApp(const ScamDetectorApp());
@@ -105,6 +109,26 @@ class _RecordingHomePageState extends State<RecordingHomePage> {
     }
   }
 
+  /// Copies the bundled sample recording to a temp file and treats it exactly
+  /// like a fresh screen recording, so the normal upload path is exercised.
+  Future<void> _useSampleRecording() async {
+    setState(() => _errorMessage = null);
+    try {
+      final data = await rootBundle.load(_sampleRecordingAsset);
+      final file = File(
+        '${Directory.systemTemp.path}/sample_recording_'
+        '${DateTime.now().millisecondsSinceEpoch}.mp4',
+      );
+      await file.writeAsBytes(data.buffer.asUint8List(), flush: true);
+      setState(() {
+        _recordingPath = file.path;
+        _stage = _Stage.recorded;
+      });
+    } catch (err) {
+      setState(() => _errorMessage = 'Could not load sample recording: $err');
+    }
+  }
+
   void _reset() {
     setState(() {
       _stage = _Stage.idle;
@@ -163,10 +187,24 @@ class _RecordingHomePageState extends State<RecordingHomePage> {
   Widget _buildControls() {
     switch (_stage) {
       case _Stage.idle:
-        return ElevatedButton.icon(
-          onPressed: _startRecording,
-          icon: const Icon(Icons.fiber_manual_record),
-          label: const Text('Start recording'),
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            ElevatedButton.icon(
+              onPressed: _startRecording,
+              icon: const Icon(Icons.fiber_manual_record),
+              label: const Text('Start recording'),
+            ),
+            // Test affordance: runs the analyze pipeline on a bundled sample
+            // recording, so it can be exercised without recording first.
+            // TODO: wrap in `if (kDebugMode)` before shipping a release build.
+            const SizedBox(height: 8),
+            OutlinedButton.icon(
+              onPressed: _useSampleRecording,
+              icon: const Icon(Icons.play_circle_outline),
+              label: const Text('Use sample recording'),
+            ),
+          ],
         );
       case _Stage.recording:
         return ElevatedButton.icon(
