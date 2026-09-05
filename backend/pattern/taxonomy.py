@@ -45,7 +45,13 @@ class PressureTactic(str, Enum):
 
 
 class RequestedAction(str, Enum):
-    """What the other party is asking the user to actually do."""
+    """What the other party is asking the user to actually do.
+
+    A conversation asks for several of these in sequence - click this, confirm
+    your NRIC, then transfer - so Signals holds a list. Forcing a single "most
+    consequential" action would hide the rest from every check that reads this
+    field, and a check that cannot see its input fails silently.
+    """
 
     TRANSFER_MONEY = "transfer_money"
     SHARE_CREDENTIALS = "share_credentials"
@@ -116,7 +122,7 @@ class Signals:
 
     lureType: LureType = LureType.NONE
     pressureTactics: tuple[PressureTactic, ...] = ()
-    requestedAction: RequestedAction = RequestedAction.NONE
+    requestedActions: tuple[RequestedAction, ...] = ()
     claimedIdentity: ClaimedIdentity = ClaimedIdentity.NONE
     channel: Channel = Channel.UNKNOWN
     engagementDepth: EngagementDepth = EngagementDepth.NO_REPLY
@@ -124,3 +130,6 @@ class Signals:
 
     def claims_authority(self) -> bool:
         return self.claimedIdentity in AUTHORITY_IDENTITIES
+
+    def asks_for(self, *actions: RequestedAction) -> bool:
+        return any(a in self.requestedActions for a in actions)

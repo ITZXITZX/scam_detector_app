@@ -128,7 +128,7 @@ def test_authority_claim_with_unofficial_link_is_a_hard_trigger():
         Signals(
             lureType=LureType.AUTHORITY,
             claimedIdentity=ClaimedIdentity.POLICE,
-            requestedAction=RequestedAction.TRANSFER_MONEY,
+            requestedActions=(RequestedAction.CLICK_LINK, RequestedAction.TRANSFER_MONEY),
             pressureTactics=(
                 PressureTactic.URGENCY,
                 PressureTactic.SECRECY,
@@ -148,7 +148,7 @@ def test_verdict_is_reproducible():
     signals = Signals(
         lureType=LureType.AUTHORITY,
         claimedIdentity=ClaimedIdentity.BANK,
-        requestedAction=RequestedAction.SHARE_OTP,
+        requestedActions=(RequestedAction.SHARE_OTP,),
         urls=("https://dbs.com.sg.secure-login.co/login",),
     )
     assert decide(signals) == decide(signals)
@@ -158,7 +158,7 @@ def test_otp_request_alone_is_not_enough_to_call_it_a_scam():
     """C4 scores 40, below the threshold. Something asking for an OTP with no
     other signal is suspicious but not proven, and the honest answer is
     "couldn't confirm" rather than a guess in either direction."""
-    verdict = decide(Signals(requestedAction=RequestedAction.SHARE_OTP))
+    verdict = decide(Signals(requestedActions=(RequestedAction.SHARE_OTP,)))
     assert "C4" in _fired(verdict)
     assert verdict.outcome is Outcome.COULDNT_CONFIRM
 
@@ -183,3 +183,38 @@ def test_genuine_bank_link_does_not_fire_domain_checks():
     )
     assert not ({"C1", "C2", "C3"} & _fired(verdict))
     assert verdict.outcome is Outcome.COULDNT_CONFIRM
+
+
+def test_payment_check_survives_a_conversation_asking_for_several_things():
+    """Regression: requestedAction used to be a single value.
+
+    Scams ask for things in sequence - open this link, confirm your NRIC, then
+    transfer the money - so forcing one label meant every check reading that
+    field could only see whichever the model judged most important. A check that
+    quietly fails to fire is worse than one that is absent: the score still
+    looks as though the case was considered.
+    """
+    verdict = decide(
+        Signals(
+            claimedIdentity=ClaimedIdentity.POLICE,
+            requestedActions=(
+                RequestedAction.CLICK_LINK,
+                RequestedAction.SHARE_ID_DOCUMENT,
+                RequestedAction.TRANSFER_MONEY,
+            ),
+        )
+    )
+    assert "C5" in _fired(verdict)
+
+
+def test_credential_check_reports_every_credential_asked_for():
+    verdict = decide(
+        Signals(
+            requestedActions=(
+                RequestedAction.SHARE_OTP,
+                RequestedAction.SHARE_CREDENTIALS,
+            )
+        )
+    )
+    detail = next(c.detail for c in verdict.checks if c.id == "C4")
+    assert "share otp" in detail and "share credentials" in detail

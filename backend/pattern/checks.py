@@ -90,11 +90,15 @@ def c4_credential_request(signals: Signals) -> CheckResult:
     No legitimate organisation asks for these over chat, so the request itself
     is the signal regardless of who is asking.
     """
-    if signals.requestedAction in (RequestedAction.SHARE_CREDENTIALS, RequestedAction.SHARE_OTP):
+    asked = [
+        a for a in signals.requestedActions
+        if a in (RequestedAction.SHARE_CREDENTIALS, RequestedAction.SHARE_OTP)
+    ]
+    if asked:
+        wanted = " and ".join(a.value.replace("_", " ") for a in asked)
         return CheckResult(
             "C4", True,
-            f"Asks the user to {signals.requestedAction.value.replace('_', ' ')}, "
-            f"which no real bank or agency does",
+            f"Asks the user to {wanted}, which no real bank or agency does",
         )
     return CheckResult("C4", False)
 
@@ -105,7 +109,7 @@ def c5_payment_under_authority(signals: Signals) -> CheckResult:
     The shape of nearly every impersonation scam that ends in a loss: the
     authority claim supplies the pressure, the transfer supplies the payday.
     """
-    if signals.requestedAction is RequestedAction.TRANSFER_MONEY and signals.claims_authority():
+    if signals.asks_for(RequestedAction.TRANSFER_MONEY) and signals.claims_authority():
         return CheckResult(
             "C5", True,
             f"Asks for a transfer while claiming to be {signals.claimedIdentity.value}",
