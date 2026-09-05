@@ -332,8 +332,14 @@ too-good-to-be-true offers). The summary is one short sentence naming the \
 signals found, or stating that none were found.
 - flaggedMessageIndexes: indexes of the specific messages containing those \
 signals. Empty if none.
-- warnings: uncertainty the user should know about (unreadable messages, \
-ambiguous senders, possible missing messages). Empty if none.
+- warnings: shown directly to the phone's owner, who may not be technical and \
+is deciding right now whether to hang up. Include a warning ONLY when it would \
+change what they do or how much they trust this verdict, such as part of the \
+conversation being unreadable or apparently missing. Write it as a plain \
+sentence addressed to them. Never mention message indexes, transcription \
+mechanics, your own confidence, or work you considered and decided was \
+unnecessary. Prefer an empty list: a warning that does not change their next \
+action is noise that makes the real ones easier to ignore.
 """
 
 
