@@ -328,54 +328,97 @@ class _RecordingHomePageState extends State<RecordingHomePage> {
     }
   }
 
-  Widget _buildRiskBanner(ScamAnalysis analysis) {
-    if (analysis.riskLevel == 'unavailable') {
-      return Padding(
-        padding: const EdgeInsets.only(bottom: 12),
-        child: Text(
-          'AI scam analysis unavailable (no API key configured)',
-          style: Theme.of(context).textTheme.bodySmall,
-        ),
-      );
-    }
-    final (color, icon, label) = switch (analysis.riskLevel) {
-      'high' => (Colors.red.shade100, Icons.warning_amber_rounded, 'LIKELY SCAM'),
-      'medium' => (Colors.amber.shade100, Icons.help_outline, 'SUSPICIOUS'),
-      _ => (Colors.green.shade100, Icons.check_circle_outline, 'LOOKS SAFE'),
-    };
+  /// The verdict, what to do about it, and - folded away - why.
+  ///
+  /// What to do comes first and stays open. Someone deciding whether to hang up
+  /// needs the instruction, not the evidence for it; the reasons are
+  /// justification they can ask for. The previous version showed eight bullets
+  /// mixing both, which is how a warning stops being read.
+  ///
+  /// No score. The number is deterministic now, but its weights are still
+  /// judgement calls, and "55" next to a threshold of 60 implies a precision
+  /// that is not there.
+  Widget _buildVerdictCard(AnalyzeResult result) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final isScam = result.verdict!.outcome == 'SCAM';
+    final advice = result.advice;
+    final fired = result.checks.where((c) => c.fired && c.detail.isNotEmpty).toList();
+
     return Container(
       margin: const EdgeInsets.only(bottom: 16),
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(color: color, borderRadius: BorderRadius.circular(12)),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: isScam ? scheme.errorContainer : scheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(12),
+      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: [
-              Icon(icon, size: 20),
+              Icon(isScam ? Icons.warning_amber_rounded : Icons.help_outline, size: 20),
               const SizedBox(width: 8),
-              Text(label, style: Theme.of(context).textTheme.titleMedium),
-              const Spacer(),
-              Text('risk ${analysis.riskScore}/100'),
+              Text(
+                isScam ? 'LIKELY SCAM' : 'COULD NOT CONFIRM',
+                style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
+              ),
             ],
           ),
-          const SizedBox(height: 4),
-          Text(analysis.summary),
-          for (final warning in analysis.warnings)
-            Padding(
-              padding: const EdgeInsets.only(top: 4),
-              child: Text('• $warning', style: Theme.of(context).textTheme.bodySmall),
+          if (advice != null && advice.headline.isNotEmpty) ...[
+            const SizedBox(height: 8),
+            Text(advice.headline, style: theme.textTheme.bodyLarge),
+          ],
+          if (advice != null && advice.whatToDo.isNotEmpty) ...[
+            const SizedBox(height: 16),
+            Text('What to do',
+                style: theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.bold)),
+            const SizedBox(height: 6),
+            for (final (index, step) in advice.whatToDo.indexed)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 6),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    SizedBox(width: 22, child: Text('${index + 1}.')),
+                    Expanded(child: Text(step)),
+                  ],
+                ),
+              ),
+            if (advice.source.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.only(top: 4),
+                child: Text('Guidance from ScamShield',
+                    style: theme.textTheme.labelSmall),
+              ),
+          ],
+          if (fired.isNotEmpty) ...[
+            const SizedBox(height: 8),
+            Theme(
+              // The default divider draws lines across the coloured card.
+              data: theme.copyWith(dividerColor: Colors.transparent),
+              child: ExpansionTile(
+                title: Text('Why we flagged this',
+                    style: theme.textTheme.titleSmall),
+                tilePadding: EdgeInsets.zero,
+                childrenPadding: const EdgeInsets.only(bottom: 8),
+                expandedCrossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  for (final check in fired)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 4),
+                      child: Text('• ${check.detail}',
+                          style: theme.textTheme.bodySmall),
+                    ),
+                ],
+              ),
             ),
+          ],
         ],
       ),
     );
   }
 
-  /// "Third authority scam you've checked", shown only when this conversation
-  /// repeats a pattern.
-  ///
-  /// Stays silent on a first encounter: a line that appears every time stops
-  /// being read, and the point is to make a change visible, not to decorate.
   Widget _buildPatternShift(AnalyzeResult result) {
     final profile = _profile;
     final lure = result.signals?.lureType;
@@ -460,7 +503,7 @@ class _RecordingHomePageState extends State<RecordingHomePage> {
     final flagged = result?.analysis?.flaggedMessageIndexes.toSet() ?? const <int>{};
     return ListView(
       children: [
-        if (result?.analysis != null) _buildRiskBanner(result!.analysis!),
+        if (result?.verdict != null) _buildVerdictCard(result!),
         if (result != null) _buildPatternShift(result),
         if (result != null && result.transcript.isNotEmpty) ...[
           Text('Reconstructed conversation', style: Theme.of(context).textTheme.titleMedium),

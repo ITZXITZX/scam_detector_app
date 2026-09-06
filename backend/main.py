@@ -52,7 +52,7 @@ from pattern.taxonomy import (
     Signals,
 )
 from profile.demo import load_sample_profile
-from profile.model import Encounter
+from profile.model import Encounter, Profile
 from profile.store import clear_encounters, get_profile, record_encounter
 
 if TYPE_CHECKING:
@@ -166,6 +166,18 @@ class ProfileSummary(BaseModel):
     usualChannel: str | None
 
 
+class AdviceSummary(BaseModel):
+    """What the user should do, and where it came from.
+
+    `whatToDo` is verbatim official wording rather than anything the model
+    wrote: it selects which steps apply, the backend renders their text.
+    """
+
+    headline: str
+    whatToDo: list[str]
+    source: str
+
+
 class VerdictSummary(BaseModel):
     outcome: str  # "SCAM" or "COULDNT_CONFIRM"; never "safe"
     score: int
@@ -180,6 +192,7 @@ class AnalyzeResponse(BaseModel):
     signals: SignalSummary
     checks: list[CheckOutcome]
     verdict: VerdictSummary
+    advice: AdviceSummary
     # Shim: riskLevel/riskScore inside `analysis` are derived from `verdict` so
     # the current app keeps working. Delete once the UI reads verdict + checks.
     analysis: ScamAnalysis
@@ -455,6 +468,12 @@ class _LlmVerdict(BaseModel):
     flaggedMessageIndexes: list[int]
     corrections: list[_LlmCorrection]
     warnings: list[str]
+    # The advice the user acts on. `headline` is written; the steps are only
+    # SELECTED, by index, from the official list the prompt supplies. Choosing
+    # from a list rather than writing prose is what stops the helpline from
+    # changing between runs and makes inventing an agency impossible.
+    adviceHeadline: str
+    adviceStepIndexes: list[int]
 
 
 _LLM_INSTRUCTIONS = """\
@@ -486,26 +505,44 @@ rating of your own. If the verdict is COULDNT_CONFIRM, say that it could not be 
 confirmed - never that the conversation looks safe.
 - flaggedMessageIndexes: the specific messages the reasons refer to. Empty if \
 none.
+- history, when present, is what this person has checked before. Counts only: \
+you are not being shown any of those conversations. Use it in the headline ONLY \
+when it is true and relevant - a repeat of the same kind of approach is worth \
+naming, because someone who has seen it three times is being targeted rather \
+than unlucky. Do not use it to comment on the person, imply they are gullible, \
+or scold them for having engaged. If timesThisKindSeenBefore is 0, say nothing \
+about their history at all: inventing a pattern from one encounter is worse \
+than staying silent.
 - officialGuidance, when present, is what Singapore's anti-scam agencies \
 publish about this kind of scam. Draw your advice from it rather than from \
 memory, and use the helpline it names. Do not invent numbers, websites or \
 agencies that are not in it or in the conversation. It describes the category \
 in general, so prefer the parts that match what actually happened here and stay \
 silent about the parts that do not.
-- warnings: shown directly to the phone's owner, who may not be technical and \
-is deciding right now whether to hang up. Include a warning ONLY when it would \
-change what they do or how much they trust this verdict, such as part of the \
-conversation being unreadable or apparently missing. Write it as a plain \
-sentence addressed to them. Never mention message indexes, transcription \
-mechanics, your own confidence, or work you considered and decided was \
-unnecessary. Prefer an empty list: a warning that does not change their next \
-action is noise that makes the real ones easier to ignore.
+- adviceHeadline: one sentence telling the user what to do, in the imperative, \
+readable by someone who is not technical and is deciding right now whether to \
+hang up. Name the specific thing to avoid in this conversation. Do not repeat \
+the reasons and do not soften the verdict.
+- adviceStepIndexes: the indexes of the steps in officialSteps that apply here, \
+most urgent first. Choose only steps that fit what actually happened; leave out \
+the rest. You cannot add a step, and you must not restate one in your own \
+words: the exact published wording is what the user sees. Three or four is \
+usually enough, and an empty list means all of them are shown.
+- warnings: caveats about this analysis, not advice - advice belongs in the \
+fields above. Include one ONLY when it changes how much the user should trust \
+the verdict, such as part of the conversation being unreadable or apparently \
+missing. Write it as a plain sentence addressed to them. Never mention message \
+indexes, transcription mechanics, or your own confidence. Prefer an empty \
+list.
 """
 
 
 def _describe_verdict(
-    transcript: list[dict], verdict: Verdict, signals: Signals
-) -> tuple[ScamAnalysis, dict[int, str]]:
+    transcript: list[dict],
+    verdict: Verdict,
+    signals: Signals,
+    history: Profile | None = None,
+) -> tuple[ScamAnalysis, AdviceSummary, dict[int, str]]:
     """Ask Claude to put an already-decided verdict into plain language.
 
     The model cannot change the outcome: riskLevel and riskScore below come from
@@ -528,8 +565,28 @@ def _describe_verdict(
         flaggedMessageIndexes=[],
         warnings=list(verdict.reasons),
     )
+    # Official guidance for the scam type the checks identified. LureType.NONE
+    # has no entry, so an unlabelled conversation falls back to the generic
+    # advice rather than to nothing: "do not transfer money, call 1799" is
+    # right for every scam and wrong for none.
+    guidance = guidance_for(signals.lureType) or guidance_for(LureType.OTHER)
+    official_steps = list(guidance.whatToDo) if guidance else []
+
+    def _advice(headline: str, steps: list[str]) -> AdviceSummary:
+        return AdviceSummary(
+            headline=headline,
+            whatToDo=steps,
+            source=guidance.title if guidance else "",
+        )
+
+    default_headline = (
+        "This is a scam. Do not reply, pay, or share any details."
+        if verdict.outcome is Outcome.SCAM
+        else "This could not be confirmed. Check before you act on it."
+    )
+
     if not transcript or not os.environ.get("ANTHROPIC_API_KEY"):
-        return fallback, {}
+        return fallback, _advice(default_headline, official_steps), {}
 
     # The published guidance for this scam type, selected by the label the
     # pattern engine produced. Advice used to vary between runs and cite
@@ -537,10 +594,30 @@ def _describe_verdict(
     # work from instead.
     guidance = guidance_for(signals.lureType)
 
+    # What this person has run into before, so advice can connect this
+    # conversation to it: "the third time you have been approached this way"
+    # lands differently from generic guidance. Counts only - the profile stores
+    # no message text, and nothing about the other party.
+    seen_before = 0
+    if history and signals.lureType is not LureType.NONE:
+        seen_before = history.lureCounts.get(signals.lureType.value, 0)
+
     payload = {
         "verdict": verdict.outcome.value,
         "reasons": list(verdict.reasons),
+        "history": (
+            {
+                "timesThisKindSeenBefore": seen_before,
+                "totalConversationsChecked": history.encounterCount,
+                "mostCommonKind": history.top_lure(),
+            }
+            if history and history.encounterCount
+            else None
+        ),
         "officialGuidance": guidance.as_prompt_context() if guidance else None,
+        "officialSteps": [
+            {"index": i, "text": step} for i, step in enumerate(official_steps)
+        ],
         "messages": [
             {
                 "index": i,
@@ -561,10 +638,10 @@ def _describe_verdict(
             output_format=_LlmVerdict,
         )
         if response.stop_reason == "refusal" or response.parsed_output is None:
-            return fallback, {}
+            return fallback, _advice(default_headline, official_steps), {}
         described = response.parsed_output
     except Exception:
-        return fallback, {}
+        return fallback, _advice(default_headline, official_steps), {}
 
     valid = range(len(transcript))
     analysis = ScamAnalysis(
@@ -579,7 +656,17 @@ def _describe_verdict(
     corrections = {
         c.index: c.text for c in described.corrections if c.index in valid and c.text.strip()
     }
-    return analysis, corrections
+
+    # Render the chosen steps from the official text. Out-of-range indexes are
+    # dropped rather than trusted, and duplicates collapsed, so a confused
+    # selection degrades to fewer steps instead of wrong ones.
+    chosen: list[str] = []
+    for i in described.adviceStepIndexes:
+        if 0 <= i < len(official_steps) and official_steps[i] not in chosen:
+            chosen.append(official_steps[i])
+    advice = _advice(described.adviceHeadline.strip() or default_headline,
+                     chosen or official_steps)
+    return analysis, advice, corrections
 
 
 def _frame_metadata_path(recording_dir: Path) -> Path:
@@ -709,8 +796,14 @@ async def analyze_recording(recording_id: str, userId: str = "") -> AnalyzeRespo
     # sits between the signals and the outcome.
     verdict = decide(signals)
 
-    analysis, corrections = await asyncio.to_thread(
-        _describe_verdict, transcript, verdict, signals
+    # Read the profile BEFORE recording this encounter, so "the third time"
+    # counts the times before this one rather than including it.
+    history = (
+        await asyncio.to_thread(get_profile, userId) if userId else None
+    )
+
+    analysis, advice, corrections = await asyncio.to_thread(
+        _describe_verdict, transcript, verdict, signals, history
     )
     for i, corrected_text in corrections.items():
         transcript[i]["text"] = corrected_text
@@ -755,6 +848,7 @@ async def analyze_recording(recording_id: str, userId: str = "") -> AnalyzeRespo
             score=verdict.score,
             hardTriggered=list(verdict.hardTriggered),
         ),
+        advice=advice,
         analysis=analysis,
     )
 

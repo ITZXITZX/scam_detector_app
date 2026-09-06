@@ -151,6 +151,25 @@ class CheckOutcome {
       );
 }
 
+/// What the user should do, and where it came from.
+///
+/// `whatToDo` is verbatim official wording: the model chooses which published
+/// steps apply, the backend renders their text. That is why the helpline does
+/// not change between runs.
+class Advice {
+  final String headline;
+  final List<String> whatToDo;
+  final String source;
+
+  Advice({required this.headline, required this.whatToDo, required this.source});
+
+  factory Advice.fromJson(Map<String, dynamic> json) => Advice(
+        headline: json['headline'] as String? ?? '',
+        whatToDo: (json['whatToDo'] as List? ?? const []).cast<String>(),
+        source: json['source'] as String? ?? '',
+      );
+}
+
 /// The outcome the checks decided. Never "safe": only SCAM or COULDNT_CONFIRM.
 class VerdictSummary {
   final String outcome;
@@ -220,6 +239,7 @@ class AnalyzeResult {
   final SignalSummary? signals;
   final List<CheckOutcome> checks;
   final VerdictSummary? verdict;
+  final Advice? advice;
   final ScamAnalysis? analysis;
 
   AnalyzeResult({
@@ -228,6 +248,7 @@ class AnalyzeResult {
     required this.signals,
     required this.checks,
     required this.verdict,
+    required this.advice,
     required this.analysis,
   });
 
@@ -245,6 +266,9 @@ class AnalyzeResult {
         verdict: json['verdict'] == null
             ? null
             : VerdictSummary.fromJson(json['verdict'] as Map<String, dynamic>),
+        advice: json['advice'] == null
+            ? null
+            : Advice.fromJson(json['advice'] as Map<String, dynamic>),
         analysis: json['analysis'] == null
             ? null
             : ScamAnalysis.fromJson(json['analysis'] as Map<String, dynamic>),
