@@ -75,6 +75,7 @@ flutter:
   # Sample screen recording used by the debug-only "Use sample recording"
   # button, so the analyze pipeline can be exercised without recording.
   assets:
+    - assets/branding/sentry_logo.png
     - assets/sample/authority-scam-01.mp4
 
   # To add assets to your application, add an assets section, like this:

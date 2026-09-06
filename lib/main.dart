@@ -238,7 +238,14 @@ class _RecordingHomePageState extends State<RecordingHomePage> {
         title: GestureDetector(
           behavior: HitTestBehavior.opaque,
           onTap: _handleTitleTap,
-          child: const Text('Conversation Recorder'),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Image.asset('assets/branding/sentry_logo.png', width: 26),
+              const SizedBox(width: 8),
+              const Text('Sentry'),
+            ],
+          ),
         ),
         actions: [
           IconButton(
