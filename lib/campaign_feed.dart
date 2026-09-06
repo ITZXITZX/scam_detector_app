@@ -111,6 +111,27 @@ class _CampaignFeedState extends State<CampaignFeed> {
                       ].join(' · '),
                       style: theme.textTheme.labelSmall,
                     ),
+                    // Says that it is relevant, not why. The reason names what
+                    // this person has been caught by before, and the home
+                    // screen is readable over a shoulder; it stays behind the
+                    // tap.
+                    if (campaign.matchedToYou) ...[
+                      const SizedBox(height: 6),
+                      Row(
+                        children: [
+                          Icon(Icons.info_outline,
+                              size: 13, color: theme.colorScheme.error),
+                          const SizedBox(width: 5),
+                          Text(
+                            'Relevant to you',
+                            style: theme.textTheme.labelMedium?.copyWith(
+                              color: theme.colorScheme.error,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
                   ],
                 ),
               ),
