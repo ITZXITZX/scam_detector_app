@@ -20,13 +20,8 @@ from campaign.matcher import WEEKLY_WARNING_QUOTA, evaluate, select_for_user  # 
 from campaign.model import Campaign, Severity  # noqa: E402
 from campaign.store import (  # noqa: E402
     approve_campaign,
-    campaigns_already_sent,
-    is_paused,
     load_campaigns,
-    record_warning,
     save_campaign,
-    set_paused,
-    warnings_sent_this_week,
 )
 from pattern.taxonomy import (  # noqa: E402
     Channel,
@@ -248,31 +243,8 @@ def test_approving_a_draft_makes_it_sendable(tmp_path):
     assert approve_campaign("draft", db_path=db)
     assert load_campaigns(approved_only=True, db_path=db)[0].id == "draft"
 
-
-def test_consent_defaults_to_not_paused(tmp_path):
-    assert not is_paused("nobody", db_path=tmp_path / "c.db")
-
-
-def test_pausing_and_resuming(tmp_path):
-    db = tmp_path / "c.db"
-    set_paused("u1", True, db_path=db)
-    assert is_paused("u1", db_path=db)
-    set_paused("u1", False, db_path=db)
-    assert not is_paused("u1", db_path=db)
-
-
-def test_sent_warnings_are_recorded_once(tmp_path):
-    db = tmp_path / "c.db"
-    record_warning("u1", "c1", db_path=db)
-    record_warning("u1", "c1", db_path=db)
-    assert campaigns_already_sent("u1", db_path=db) == {"c1"}
-
-
-def test_the_quota_counts_a_rolling_week(tmp_path):
-    """A calendar week would allow two on Sunday night and two on Monday
-    morning, which is four in twelve hours."""
-    db = tmp_path / "c.db"
-    record_warning("u1", "c1", db_path=db)
-    assert warnings_sent_this_week("u1", now=datetime.now(timezone.utc), db_path=db) == 1
-    later = datetime.now(timezone.utc) + timedelta(days=8)
-    assert warnings_sent_this_week("u1", now=later, db_path=db) == 0
+# The server no longer records which person received which warning, nor a
+# consent flag. Both were removed: the phone is the only place that needs to
+# know what it has already shown, and keeping a per-person send log on the
+# server means holding a list of who is vulnerable to what. `select_for_user`
+# still takes `already_sent` and `sent_this_week`, so the device supplies them.

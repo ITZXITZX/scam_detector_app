@@ -189,6 +189,45 @@ class VerdictSummary {
       );
 }
 
+/// One scam wave currently circulating.
+///
+/// Everyone sees the same cards in the same order. [matchedToYou] marks the
+/// ones this device would also be notified about; [matchReason] stays off the
+/// card and appears only after a tap, so a glance over someone's shoulder does
+/// not read their history back to them.
+class ScamCampaign {
+  final String id;
+  final String title;
+  final String body;
+  final String? publishedOn;
+  final String source;
+  final String severity;
+  final bool matchedToYou;
+  final String matchReason;
+
+  ScamCampaign({
+    required this.id,
+    required this.title,
+    required this.body,
+    required this.publishedOn,
+    required this.source,
+    required this.severity,
+    required this.matchedToYou,
+    required this.matchReason,
+  });
+
+  factory ScamCampaign.fromJson(Map<String, dynamic> json) => ScamCampaign(
+        id: json['id'] as String,
+        title: json['title'] as String,
+        body: json['body'] as String,
+        publishedOn: json['publishedOn'] as String?,
+        source: json['source'] as String? ?? '',
+        severity: json['severity'] as String? ?? 'normal',
+        matchedToYou: json['matchedToYou'] as bool? ?? false,
+        matchReason: json['matchReason'] as String? ?? '',
+      );
+}
+
 /// What a user has turned out to be vulnerable to.
 ///
 /// Scores are counts: how many times this person has been approached with each
@@ -387,6 +426,22 @@ class RecordingFramesApi {
       throw Exception('Backend returned ${response.statusCode}: ${response.body}');
     }
     return RiskProfile.fromJson(jsonDecode(response.body) as Map<String, dynamic>);
+  }
+
+  /// Scam waves circulating now, newest first.
+  ///
+  /// Passing [userId] marks which ones this device would be warned about. The
+  /// server computes that for the response and keeps no record of it.
+  static Future<List<ScamCampaign>> fetchCampaigns({String? userId}) async {
+    final query = (userId == null || userId.isEmpty) ? '' : '?userId=$userId';
+    final response = await http.get(Uri.parse('$baseUrl/campaigns$query'));
+    if (response.statusCode != 200) {
+      throw Exception('Backend returned ${response.statusCode}: ${response.body}');
+    }
+    final decoded = jsonDecode(response.body) as Map<String, dynamic>;
+    return (decoded['campaigns'] as List? ?? const [])
+        .map((e) => ScamCampaign.fromJson(e as Map<String, dynamic>))
+        .toList();
   }
 
   /// Development only: fill this profile with fabricated encounters.
