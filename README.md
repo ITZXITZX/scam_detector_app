@@ -77,6 +77,89 @@ Tap **Start recording**, grant the requested permission, tap **Stop
 recording**, and then tap **Process recording** to upload the MP4 and view the
 extracted frames.
 
+### 3a. Test with a physical Android phone
+
+This is an alternative to using an Android emulator. The phone and the computer running the backend must be connected to the same Wi-Fi network.
+
+#### Enable USB debugging
+
+1. On the phone, open **Settings > About phone** and tap **Build number** seven times to enable Developer options. The exact menu may vary by phone.
+2. Open **Settings > System > Developer options** (or search Settings for “Developer options”).
+3. Enable **Developer options**. Then within **Developer options**, enable **USB debugging**.
+4. Connect the phone by USB, unlock it, and accept the **Allow USB debugging?** prompt. Verify that Flutter can see it:
+   ```powershell
+   flutter devices
+   ```
+
+#### Configure and test the local backend connection
+
+Find the computer's Wi-Fi IPv4 address with:
+
+```powershell
+ipconfig
+```
+
+Use the IPv4 address under the connected **Wireless LAN adapter Wi-Fi** (for example, `192.168.1.14`). Do not use the WSL/Hyper-V address, `localhost`, or `10.0.2.2`; those addresses are for other environments.
+
+Start the backend from the `backend` directory and bind it to the local network:
+
+```powershell
+.venv\Scripts\python.exe -m uvicorn main:app --host 0.0.0.0 --port 8000
+```
+
+Keep this terminal running. Before installing or running the Flutter app, verify the backend on the computer:
+
+```text
+http://127.0.0.1:8000/docs
+```
+
+You can also verify that the port is listening:
+
+```powershell
+Test-NetConnection 127.0.0.1 -Port 8000
+Test-NetConnection <computer-wifi-ip> -Port 8000
+```
+
+Both checks should report `TcpTestSucceeded : True`. If the first check fails, the backend is not running successfully. If the first succeeds but the second fails, check the Windows Firewall instructions below (you need to allow the backend through the Frewall).
+
+On the phone's browser, open:
+
+```text
+http://<computer-wifi-ip>:8000/docs
+```
+
+The FastAPI documentation page should load. If it does not, confirm that the phone and computer are on the same Wi-Fi network and tthen check the Windows Firewall instructions below.
+
+Finally, update `RecordingFramesApi.baseUrl` in
+`lib/recording_frames_api.dart` to use the computer's Wi-Fi IP address:
+
+```dart
+return 'http://<computer-wifi-ip>:8000';
+```
+
+Then run the app on the connected phone:
+
+```powershell
+flutter run -d <phone-device-id>
+```
+
+#### Allow the backend through Windows Firewall
+
+Only do this if the computer's `127.0.0.1` test succeeds but the phone cannot open `<wifi_ipv4_addr>/docs`.
+
+1. Press `Win + R`, enter `control firewall.cpl`, and press **Enter**.
+2. Select **Allow an app or feature through Windows Defender Firewall**.
+3. Select **Change settings** and approve the administrator prompt.
+4. If `Python` or `python.exe` is listed, enable **Private** and leave
+   **Public** disabled.
+5. If it is not listed, choose **Allow another app... > Browse...**, select the
+   `python.exe` used to start Uvicorn, and add it. Then enable **Private** only.
+6. Click **OK**, restart Uvicorn if necessary, and repeat the phone `/docs`
+   test.
+
+After testing, remove the exception: return to **Allow an app or feature through Windows Defender Firewall**, select **Change settings**, clear the **Private** checkbox for Python (or select the Python entry and click **Remove** if it was manually added), then click **OK**. Keep **Public**
+unchecked throughout.
+
 ### Troubleshooting
 
 - **Backend connection failed:** confirm the backend terminal is still running
