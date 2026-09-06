@@ -50,8 +50,9 @@ from pattern.taxonomy import (
     RequestedAction,
     Signals,
 )
+from profile.demo import load_sample_profile
 from profile.model import Encounter
-from profile.store import get_profile, record_encounter
+from profile.store import clear_encounters, get_profile, record_encounter
 
 if TYPE_CHECKING:
     from rapidocr import RapidOCR
@@ -155,9 +156,10 @@ class ProfileSummary(BaseModel):
 
     userId: str
     encounterCount: int
-    vulnerability: dict[str, float]
-    tacticSensitivity: dict[str, float]
+    vulnerability: dict[str, int]
+    tacticSensitivity: dict[str, int]
     channels: dict[str, int]
+    lureCounts: dict[str, int]
     topLure: str | None
     usualChannel: str | None
 
@@ -289,8 +291,9 @@ class _ExtractedSignals(BaseModel):
     """
 
     lureType: Literal[
-        "authority", "investment", "romance", "parcel", "job", "lottery",
-        "tech_support", "ecommerce", "impersonation_known_person", "other", "none",
+        "authority", "investment", "job", "ecommerce", "phishing", "fake_friend",
+        "loan", "tech_support", "insurance", "romance", "sexual_service",
+        "other", "none",
     ]
     pressureTactics: list[
         Literal[
@@ -340,7 +343,7 @@ Rules:
 
 Then label the conversation. You are categorising it, NOT judging how dangerous it is: something else decides that from your labels, so a wrong label is worse than a cautious one. Use "none" or "unknown" whenever the evidence is not there.
 
-- lureType: what the other party is pretending the conversation is about.
+- lureType: what the other party is pretending the conversation is about. These are the categories Singapore's ScamShield uses. "authority" is government or police impersonation; "fake_friend" is someone claiming to be a contact who has changed number; "phishing" covers messages posing as a bank, delivery company or tax office to harvest credentials; "loan" is an unsolicited fast-cash offer; "insurance" is a bogus policy needing urgent payment. Use "other" for a scam none of these names, such as an advance-fee or inheritance approach.
 - pressureTactics: only tactics actually present. "isolation" is telling the user not to involve anyone else; "secrecy" is asking them to keep it confidential; "threat" is naming a consequence.
 - requestedActions: EVERY distinct thing the other party asks the user to do, not just the most serious one. A scam asks for several in sequence - open a link, confirm an NRIC, then transfer money - and each is judged separately. Empty list if they ask for nothing.
 - claimedIdentity: who the other party SAYS they are. Never who they are.
@@ -752,9 +755,34 @@ async def read_profile(user_id: str) -> ProfileSummary:
         vulnerability=profile.vulnerability,
         tacticSensitivity=profile.tacticSensitivity,
         channels=profile.channels,
+        lureCounts=profile.lureCounts,
         topLure=profile.top_lure(),
         usualChannel=profile.usual_channel(),
     )
+
+
+@app.post("/users/{user_id}/profile/demo", response_model=ProfileSummary)
+async def load_demo_profile(user_id: str) -> ProfileSummary:
+    """Fill a profile with fabricated encounters, for development.
+
+    The screen is meant to show a vulnerability fading over months and a
+    habitual channel, neither of which real testing can produce: analyses are
+    all seconds old and the channel is usually labelled "unknown". Not for a
+    release build.
+    """
+    await asyncio.to_thread(load_sample_profile, user_id)
+    return await read_profile(user_id)
+
+
+@app.delete("/users/{user_id}/profile", response_model=ProfileSummary)
+async def clear_profile(user_id: str) -> ProfileSummary:
+    """Forget everything recorded for this user.
+
+    Paired with the sample loader - fabricated data is only safe to add if it
+    can be removed - and it is the honest answer to "delete my history".
+    """
+    await asyncio.to_thread(clear_encounters, user_id)
+    return await read_profile(user_id)
 
 
 _ocr_engine: "RapidOCR | None" = None

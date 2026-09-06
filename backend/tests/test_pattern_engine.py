@@ -252,7 +252,7 @@ def test_model_suspicion_tips_a_conversation_the_checks_score_low():
     """
     without = decide(
         Signals(
-            lureType=LureType.LOTTERY,
+            lureType=LureType.OTHER,
             pressureTactics=(PressureTactic.URGENCY,),
             claimedIdentity=ClaimedIdentity.STRANGER,
         )
@@ -262,7 +262,7 @@ def test_model_suspicion_tips_a_conversation_the_checks_score_low():
 
     with_model = decide(
         Signals(
-            lureType=LureType.LOTTERY,
+            lureType=LureType.OTHER,
             pressureTactics=(PressureTactic.URGENCY,),
             claimedIdentity=ClaimedIdentity.STRANGER,
             modelSuspicion=ModelSuspicion.STRONG,

@@ -17,17 +17,33 @@ from enum import Enum
 
 
 class LureType(str, Enum):
-    """What the scam is pretending to be about."""
+    """What the scam is pretending to be about.
 
-    AUTHORITY = "authority"  # police, bank, government, tax
+    These are ScamShield's own categories, so a campaign described in the terms
+    Singapore's anti-scam agencies use can be matched against a user profile
+    without translation. Inventing our own would mean a "loan scam" advisory
+    matching nobody.
+
+    Two things deliberately absent. Cryptocurrency is not here: ScamShield's own
+    page says crypto scams "fall into three main types - government officials
+    impersonation, investment, job scams", so it is a payment rail rather than a
+    lure, and listing it would split those three. Parcel is not here either; the
+    phishing page treats parcel-delivery messages as a phishing variant.
+    """
+
+    AUTHORITY = "authority"          # government officials impersonation
     INVESTMENT = "investment"
-    ROMANCE = "romance"
-    PARCEL = "parcel"
     JOB = "job"
-    LOTTERY = "lottery"
-    TECH_SUPPORT = "tech_support"
     ECOMMERCE = "ecommerce"
-    IMPERSONATION_KNOWN_PERSON = "impersonation_known_person"
+    PHISHING = "phishing"
+    FAKE_FRIEND = "fake_friend"      # "I lost my phone, new number"
+    LOAN = "loan"
+    TECH_SUPPORT = "tech_support"
+    INSURANCE = "insurance"
+    ROMANCE = "romance"              # internet love
+    SEXUAL_SERVICE = "sexual_service"
+    # Anything outside ScamShield's list, including the advance-fee and
+    # inheritance families their categories do not name.
     OTHER = "other"
     NONE = "none"
 

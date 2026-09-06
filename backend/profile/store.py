@@ -101,6 +101,17 @@ def load_encounters(user_id: str, db_path: Path | None = None) -> list[Encounter
     ]
 
 
+def clear_encounters(user_id: str, db_path: Path | None = None) -> int:
+    """Delete a user's history. Returns how many rows went.
+
+    Exists for the sample-data affordance: loading fabricated encounters is only
+    safe if they can be taken away again.
+    """
+    with closing(_connect(db_path)) as conn, conn:
+        cursor = conn.execute("DELETE FROM encounters WHERE user_id = ?", (user_id,))
+        return cursor.rowcount
+
+
 def get_profile(
     user_id: str, now: datetime | None = None, db_path: Path | None = None
 ) -> Profile:
