@@ -6,6 +6,8 @@ import 'package:flutter_screen_recording/flutter_screen_recording.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:permission_handler/permission_handler.dart';
 
+import 'backend_config.dart';
+import 'backend_settings_screen.dart';
 import 'campaign_feed.dart';
 import 'device_user.dart';
 import 'profile_screen.dart';
@@ -14,7 +16,9 @@ import 'recording_frames_api.dart';
 /// Bundled screen recording used by the "Use sample recording" test button.
 const _sampleRecordingAsset = 'assets/sample/authority-scam-01.mp4';
 
-void main() {
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await BackendConfig.initialize();
   runApp(const ScamDetectorApp());
 }
 
@@ -32,7 +36,15 @@ class ScamDetectorApp extends StatelessWidget {
   }
 }
 
-enum _Stage { idle, recording, recorded, uploading, framesReady, analysing, done }
+enum _Stage {
+  idle,
+  recording,
+  recorded,
+  uploading,
+  framesReady,
+  analysing,
+  done,
+}
 
 class RecordingHomePage extends StatefulWidget {
   const RecordingHomePage({super.key});
@@ -49,6 +61,7 @@ class _RecordingHomePageState extends State<RecordingHomePage> {
   FramesResult? _frames;
   AnalyzeResult? _result;
   RiskProfile? _profile;
+  int _titleTapCount = 0;
 
   @override
   void initState() {
@@ -65,7 +78,10 @@ class _RecordingHomePageState extends State<RecordingHomePage> {
     if (Platform.isAndroid) {
       final status = await Permission.notification.request();
       if (!status.isGranted) {
-        setState(() => _errorMessage = 'Notification permission is required to record the screen.');
+        setState(
+          () => _errorMessage =
+              'Notification permission is required to record the screen.',
+        );
         return false;
       }
     }
@@ -109,7 +125,9 @@ class _RecordingHomePageState extends State<RecordingHomePage> {
     });
 
     try {
-      final frames = await RecordingFramesApi.createRecordingFromVideo(File(_recordingPath!));
+      final frames = await RecordingFramesApi.createRecordingFromVideo(
+        File(_recordingPath!),
+      );
       setState(() {
         _stage = _Stage.framesReady;
         _frames = frames;
@@ -217,7 +235,11 @@ class _RecordingHomePageState extends State<RecordingHomePage> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Conversation Recorder'),
+        title: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTap: _handleTitleTap,
+          child: const Text('Conversation Recorder'),
+        ),
         actions: [
           IconButton(
             icon: const Icon(Icons.person_outline),
@@ -256,9 +278,16 @@ class _RecordingHomePageState extends State<RecordingHomePage> {
   Future<void> _openProfile() async {
     final userId = await DeviceUser.id();
     if (!mounted) return;
-    await Navigator.of(context).push(
-      MaterialPageRoute(builder: (_) => ProfileScreen(userId: userId)),
-    );
+    await Navigator.of(context)
+        .push(MaterialPageRoute(builder: (_) => ProfileScreen(userId: userId)));
+  }
+
+  void _handleTitleTap() {
+    _titleTapCount++;
+    if (_titleTapCount < BackendSettingsScreen.unlockTapCount) return;
+    _titleTapCount = 0;
+    Navigator.of(context)
+        .push(MaterialPageRoute(builder: (_) => const BackendSettingsScreen()));
   }
 
   Widget _buildControls() {
@@ -312,7 +341,11 @@ class _RecordingHomePageState extends State<RecordingHomePage> {
       case _Stage.uploading:
         return const Row(
           children: [
-            SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2)),
+            SizedBox(
+              width: 16,
+              height: 16,
+              child: CircularProgressIndicator(strokeWidth: 2),
+            ),
             SizedBox(width: 12),
             Text('Extracting frames...'),
           ],
@@ -334,7 +367,11 @@ class _RecordingHomePageState extends State<RecordingHomePage> {
       case _Stage.analysing:
         return const Row(
           children: [
-            SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2)),
+            SizedBox(
+              width: 16,
+              height: 16,
+              child: CircularProgressIndicator(strokeWidth: 2),
+            ),
             SizedBox(width: 12),
             Text('Reading conversation & assessing risk...'),
           ],
@@ -363,7 +400,9 @@ class _RecordingHomePageState extends State<RecordingHomePage> {
     final scheme = theme.colorScheme;
     final isScam = result.verdict!.outcome == 'SCAM';
     final advice = result.advice;
-    final fired = result.checks.where((c) => c.fired && c.detail.isNotEmpty).toList();
+    final fired = result.checks
+        .where((c) => c.fired && c.detail.isNotEmpty)
+        .toList();
 
     return Container(
       margin: const EdgeInsets.only(bottom: 16),
@@ -377,11 +416,16 @@ class _RecordingHomePageState extends State<RecordingHomePage> {
         children: [
           Row(
             children: [
-              Icon(isScam ? Icons.warning_amber_rounded : Icons.help_outline, size: 20),
+              Icon(
+                isScam ? Icons.warning_amber_rounded : Icons.help_outline,
+                size: 20,
+              ),
               const SizedBox(width: 8),
               Text(
                 isScam ? 'LIKELY SCAM' : 'COULD NOT CONFIRM',
-                style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
+                style: theme.textTheme.titleMedium?.copyWith(
+                  fontWeight: FontWeight.bold,
+                ),
               ),
             ],
           ),
@@ -391,8 +435,12 @@ class _RecordingHomePageState extends State<RecordingHomePage> {
           ],
           if (advice != null && advice.whatToDo.isNotEmpty) ...[
             const SizedBox(height: 16),
-            Text('What to do',
-                style: theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.bold)),
+            Text(
+              'What to do',
+              style: theme.textTheme.titleSmall?.copyWith(
+                fontWeight: FontWeight.bold,
+              ),
+            ),
             const SizedBox(height: 6),
             for (final (index, step) in advice.whatToDo.indexed)
               Padding(
@@ -408,8 +456,10 @@ class _RecordingHomePageState extends State<RecordingHomePage> {
             if (advice.source.isNotEmpty)
               Padding(
                 padding: const EdgeInsets.only(top: 4),
-                child: Text('Guidance from ScamShield',
-                    style: theme.textTheme.labelSmall),
+                child: Text(
+                  'Guidance from ScamShield',
+                  style: theme.textTheme.labelSmall,
+                ),
               ),
           ],
           if (fired.isNotEmpty) ...[
@@ -418,8 +468,10 @@ class _RecordingHomePageState extends State<RecordingHomePage> {
               // The default divider draws lines across the coloured card.
               data: theme.copyWith(dividerColor: Colors.transparent),
               child: ExpansionTile(
-                title: Text('Why we flagged this',
-                    style: theme.textTheme.titleSmall),
+                title: Text(
+                  'Why we flagged this',
+                  style: theme.textTheme.titleSmall,
+                ),
                 tilePadding: EdgeInsets.zero,
                 childrenPadding: const EdgeInsets.only(bottom: 8),
                 expandedCrossAxisAlignment: CrossAxisAlignment.start,
@@ -427,8 +479,10 @@ class _RecordingHomePageState extends State<RecordingHomePage> {
                   for (final check in fired)
                     Padding(
                       padding: const EdgeInsets.only(bottom: 4),
-                      child: Text('• ${check.detail}',
-                          style: theme.textTheme.bodySmall),
+                      child: Text(
+                        '• ${check.detail}',
+                        style: theme.textTheme.bodySmall,
+                      ),
                     ),
                 ],
               ),
@@ -485,7 +539,10 @@ class _RecordingHomePageState extends State<RecordingHomePage> {
     }
   }
 
-  Widget _buildTranscriptBubble(TranscriptMessage message, {required bool flagged}) {
+  Widget _buildTranscriptBubble(
+    TranscriptMessage message, {
+    required bool flagged,
+  }) {
     final isRight = message.senderHint == 'right';
     final isUnknown = message.senderHint == 'unknown';
     final colorScheme = Theme.of(context).colorScheme;
@@ -500,7 +557,9 @@ class _RecordingHomePageState extends State<RecordingHomePage> {
         decoration: BoxDecoration(
           color: isUnknown
               ? colorScheme.surfaceContainerHighest
-              : (isRight ? colorScheme.primaryContainer : colorScheme.secondaryContainer),
+              : (isRight
+                    ? colorScheme.primaryContainer
+                    : colorScheme.secondaryContainer),
           borderRadius: BorderRadius.circular(12),
         ),
         child: Column(
@@ -520,13 +579,17 @@ class _RecordingHomePageState extends State<RecordingHomePage> {
   }
 
   Widget _buildResults(FramesResult frames, AnalyzeResult? result) {
-    final flagged = result?.analysis?.flaggedMessageIndexes.toSet() ?? const <int>{};
+    final flagged =
+        result?.analysis?.flaggedMessageIndexes.toSet() ?? const <int>{};
     return ListView(
       children: [
         if (result?.verdict != null) _buildVerdictCard(result!),
         if (result != null) _buildPatternShift(result),
         if (result != null && result.transcript.isNotEmpty) ...[
-          Text('Reconstructed conversation', style: Theme.of(context).textTheme.titleMedium),
+          Text(
+            'Reconstructed conversation',
+            style: Theme.of(context).textTheme.titleMedium,
+          ),
           const SizedBox(height: 8),
           for (final (index, message) in result.transcript.indexed)
             _buildTranscriptBubble(message, flagged: flagged.contains(index)),

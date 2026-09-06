@@ -1,8 +1,9 @@
 import 'dart:convert';
 import 'dart:io';
 
-import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
+
+import 'backend_config.dart';
 
 /// One extracted preview frame returned by the backend.
 class FramePreview {
@@ -373,12 +374,7 @@ class OCRResult {
 }
 
 class RecordingFramesApi {
-  /// The Android emulator maps 10.0.2.2 to the host machine's localhost.
-  /// For a real device, replace this with your machine's LAN IP.
-  static String get baseUrl {
-    if (!kIsWeb && Platform.isAndroid) return 'http://10.0.2.2:8000';
-    return 'http://localhost:8000';
-  }
+  static String get baseUrl => BackendConfig.baseUrl;
 
   static String resolveFrameUrl(String relativeUrl) => '$baseUrl$relativeUrl';
 
