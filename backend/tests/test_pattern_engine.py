@@ -427,3 +427,15 @@ def test_the_new_checks_stay_quiet_on_an_empty_conversation():
     verdict = decide(Signals())
     assert not ({"C12", "C13", "C14", "C15", "C16"} & _fired(verdict))
     assert verdict.outcome is Outcome.COULDNT_CONFIRM
+
+
+def test_channels_cover_what_real_advisories_name():
+    """Campaigns are written from police advisories, and a campaign whose
+    channel cannot be expressed matches nobody.
+
+    These three came from advisories that named them: phishing "via iMessage"
+    (Sept 2026), phishing emails impersonating DBS (Mar 2026), and government
+    impersonation, which typically starts with a call.
+    """
+    values = {c.value for c in Channel}
+    assert {"imessage", "email", "phone_call"} <= values

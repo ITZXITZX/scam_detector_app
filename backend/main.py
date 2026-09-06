@@ -327,7 +327,8 @@ class _ExtractedSignals(BaseModel):
         "known_person", "stranger", "none",
     ]
     channel: Literal[
-        "whatsapp", "telegram", "sms", "wechat", "facebook", "instagram", "unknown"
+        "whatsapp", "telegram", "sms", "imessage", "email", "phone_call",
+        "wechat", "facebook", "instagram", "unknown",
     ]
     engagementDepth: Literal[
         "no_reply", "replied", "shared_personal_info", "shared_credentials",
@@ -362,7 +363,7 @@ Then label the conversation. You are categorising it, NOT judging how dangerous 
 - pressureTactics: only tactics actually present. "isolation" is telling the user not to involve anyone else; "secrecy" is asking them to keep it confidential; "threat" is naming a consequence.
 - requestedActions: EVERY distinct thing the other party asks the user to do, not just the most serious one. A scam asks for several in sequence - open a link, confirm an NRIC, then transfer money - and each is judged separately. Empty list if they ask for nothing.
 - claimedIdentity: who the other party SAYS they are. Never who they are.
-- channel: which app this is, read from the interface rather than the words.
+- channel: which app or medium this is, read from the interface rather than the words. "imessage" for Apple Messages (blue bubbles, iOS styling) as against "sms"; "email" for a mail client; "phone_call" for a call log or transcript rather than a chat.
 - engagementDepth: how far the phone's owner went, judged only from their own messages. no_reply if they never replied, through to initiated_payment if they say they have sent money or started a transfer.
 - urls: every link in the conversation, rejoined across line wraps.
 - modelSuspicion: your structural read, for the cases the checks cannot see. Judge against the rubric below and nothing else. Do not rate how alarming the conversation feels, and do not consider how likely a scam seems in general.
