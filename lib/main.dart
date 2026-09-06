@@ -8,6 +8,7 @@ import 'package:permission_handler/permission_handler.dart';
 
 import 'backend_config.dart';
 import 'backend_settings_screen.dart';
+import 'campaign_feed.dart';
 import 'device_user.dart';
 import 'profile_screen.dart';
 import 'recording_frames_api.dart';
@@ -54,12 +55,22 @@ class RecordingHomePage extends StatefulWidget {
 
 class _RecordingHomePageState extends State<RecordingHomePage> {
   _Stage _stage = _Stage.idle;
+  String? _deviceUserId;
   String? _recordingPath;
   String? _errorMessage;
   FramesResult? _frames;
   AnalyzeResult? _result;
   RiskProfile? _profile;
   int _titleTapCount = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    // Resolved once so the feed can be built synchronously afterwards.
+    DeviceUser.id().then((id) {
+      if (mounted) setState(() => _deviceUserId = id);
+    });
+  }
 
   Future<bool> _ensurePermissions() async {
     // Android 13+ requires explicit notification permission for the
@@ -249,7 +260,15 @@ class _RecordingHomePageState extends State<RecordingHomePage> {
             ],
             const SizedBox(height: 24),
             if (_frames != null)
-              Expanded(child: _buildResults(_frames!, _result)),
+              Expanded(child: _buildResults(_frames!, _result))
+            // The feed sits under the buttons on the idle screen, so what is
+            // going around is visible without going looking for it.
+            else if (_stage == _Stage.idle && _deviceUserId != null)
+              Expanded(
+                child: SingleChildScrollView(
+                  child: CampaignFeed(userId: _deviceUserId!),
+                ),
+              ),
           ],
         ),
       ),

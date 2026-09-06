@@ -27,7 +27,8 @@ import subprocess
 import threading
 import time
 import uuid
-from datetime import datetime, timezone
+from dataclasses import replace
+from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
@@ -51,6 +52,9 @@ from pattern.taxonomy import (
     RequestedAction,
     Signals,
 )
+from campaign.ingest import draft_campaign, fetch_advisories, fetch_article
+from campaign.matcher import evaluate
+from campaign.store import approve_campaign, load_campaigns, save_campaign, seed_campaigns
 from profile.demo import load_sample_profile
 from profile.model import Encounter, Profile
 from profile.store import clear_encounters, get_profile, record_encounter
@@ -164,6 +168,43 @@ class ProfileSummary(BaseModel):
     lureCounts: dict[str, int]
     topLure: str | None
     usualChannel: str | None
+
+
+class CampaignCard(BaseModel):
+    """One scam wave, as shown in the app's feed.
+
+    Everyone sees every card. `matchedToYou` marks the ones this device would
+    also be notified about, and is computed per request - the server keeps no
+    record of who was shown what.
+    """
+
+    id: str
+    title: str
+    body: str
+    publishedOn: str | None
+    source: str
+    severity: str
+    matchedToYou: bool
+    # Kept off the card in the UI and shown only after a tap: a glance over
+    # someone's shoulder should not read "you have been phished three times".
+    matchReason: str
+
+
+class CampaignFeed(BaseModel):
+    campaigns: list[CampaignCard]
+
+
+class IngestedCampaign(BaseModel):
+    id: str
+    title: str
+    lureType: str
+    source: str
+    approved: bool
+
+
+class IngestResult(BaseModel):
+    advisoriesFound: int
+    drafted: list[IngestedCampaign]
 
 
 class AdviceSummary(BaseModel):
@@ -327,7 +368,8 @@ class _ExtractedSignals(BaseModel):
         "known_person", "stranger", "none",
     ]
     channel: Literal[
-        "whatsapp", "telegram", "sms", "wechat", "facebook", "instagram", "unknown"
+        "whatsapp", "telegram", "sms", "imessage", "email", "phone_call",
+        "wechat", "facebook", "instagram", "unknown",
     ]
     engagementDepth: Literal[
         "no_reply", "replied", "shared_personal_info", "shared_credentials",
@@ -362,7 +404,7 @@ Then label the conversation. You are categorising it, NOT judging how dangerous 
 - pressureTactics: only tactics actually present. "isolation" is telling the user not to involve anyone else; "secrecy" is asking them to keep it confidential; "threat" is naming a consequence.
 - requestedActions: EVERY distinct thing the other party asks the user to do, not just the most serious one. A scam asks for several in sequence - open a link, confirm an NRIC, then transfer money - and each is judged separately. Empty list if they ask for nothing.
 - claimedIdentity: who the other party SAYS they are. Never who they are.
-- channel: which app this is, read from the interface rather than the words.
+- channel: which app or medium this is, read from the interface rather than the words. "imessage" for Apple Messages (blue bubbles, iOS styling) as against "sms"; "email" for a mail client; "phone_call" for a call log or transcript rather than a chat.
 - engagementDepth: how far the phone's owner went, judged only from their own messages. no_reply if they never replied, through to initiated_payment if they say they have sent money or started a transfer.
 - urls: every link in the conversation, rejoined across line wraps.
 - modelSuspicion: your structural read, for the cases the checks cannot see. Judge against the rubric below and nothing else. Do not rate how alarming the conversation feels, and do not consider how likely a scam seems in general.
@@ -897,6 +939,88 @@ async def clear_profile(user_id: str) -> ProfileSummary:
     return await read_profile(user_id)
 
 
+@app.get("/campaigns", response_model=CampaignFeed)
+async def read_campaigns(userId: str = "") -> CampaignFeed:
+    """Scam waves currently circulating, newest first.
+
+    The feed is the same for everyone; only the `matchedToYou` flag differs.
+    Ordering deliberately does not change per person - a list that silently
+    reorders itself is harder to trust than a dot.
+
+    `userId` is optional. Supplying it computes the flag for this response and
+    nothing more: no record is kept of who saw which campaign.
+    """
+    campaigns = await asyncio.to_thread(load_campaigns, True)
+    live = [c for c in campaigns if c.is_active()]
+    live.sort(key=lambda c: (c.activeFrom or date.min), reverse=True)
+
+    profile = await asyncio.to_thread(get_profile, userId) if userId else None
+
+    cards = []
+    for c in live:
+        match = evaluate(c, profile) if profile else None
+        cards.append(
+            CampaignCard(
+                id=c.id,
+                title=c.title,
+                body=c.body,
+                publishedOn=c.activeFrom.isoformat() if c.activeFrom else None,
+                source=c.source,
+                severity=c.severity.value,
+                matchedToYou=bool(match and match.matched),
+                matchReason=match.reason if match and match.matched else "",
+            )
+        )
+    return CampaignFeed(campaigns=cards)
+
+
+@app.post("/campaigns/ingest", response_model=IngestResult)
+async def ingest_campaigns(limit: int = 5, autoApprove: bool = False) -> IngestResult:
+    """Scrape today's police advisories and draft a campaign from each.
+
+    Drafts arrive unapproved and are not shown or sent until someone reads the
+    text. `autoApprove` skips that gate and exists for demos only - it puts
+    unreviewed text in front of people.
+    """
+    try:
+        advisories = await asyncio.to_thread(fetch_advisories, limit)
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Could not reach the news index: {exc}")
+
+    drafted: list[IngestedCampaign] = []
+    for advisory in advisories:
+        try:
+            article = await asyncio.to_thread(fetch_article, advisory.url)
+        except Exception:
+            continue
+        campaign = await asyncio.to_thread(draft_campaign, advisory, article, CLAUDE_MODEL)
+        if campaign is None:
+            continue
+        if autoApprove:
+            campaign = replace(campaign, approved=True)
+        await asyncio.to_thread(save_campaign, campaign)
+        drafted.append(
+            IngestedCampaign(
+                id=campaign.id, title=campaign.title,
+                lureType=campaign.lureType.value, source=campaign.source,
+                approved=campaign.approved,
+            )
+        )
+    return IngestResult(advisoriesFound=len(advisories), drafted=drafted)
+
+
+@app.post("/campaigns/{campaign_id}/approve", response_model=IngestedCampaign)
+async def approve(campaign_id: str) -> IngestedCampaign:
+    """Clear a draft to appear in the feed. A person has read what it says."""
+    if not await asyncio.to_thread(approve_campaign, campaign_id):
+        raise HTTPException(status_code=404, detail="No such campaign")
+    campaign = next(c for c in load_campaigns() if c.id == campaign_id)
+    return IngestedCampaign(
+        id=campaign.id, title=campaign.title, lureType=campaign.lureType.value,
+        source=campaign.source, approved=campaign.approved,
+    )
+
+
 _ocr_engine: "RapidOCR | None" = None
 _ocr_engine_lock = threading.Lock()
 
@@ -972,3 +1096,15 @@ async def _sweep_old_recordings() -> None:
 @app.on_event("startup")
 async def _start_sweeper() -> None:
     asyncio.create_task(_sweep_old_recordings())
+
+
+@app.on_event("startup")
+async def _seed_the_feed() -> None:
+    """Give a fresh install a feed to show without anyone running the scraper.
+
+    Only fires when the store is empty, so it cannot bring back a campaign that
+    was removed on purpose.
+    """
+    added = await asyncio.to_thread(seed_campaigns)
+    if added:
+        print(f"Seeded {added} police advisories into an empty campaign store")

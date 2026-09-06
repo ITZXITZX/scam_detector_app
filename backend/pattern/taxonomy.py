@@ -115,11 +115,25 @@ class ModelSuspicion(str, Enum):
 
 
 class Channel(str, Enum):
-    """Which app the conversation is happening in, read from the screenshot."""
+    """Which app or medium the conversation is happening in.
+
+    Read from the screenshot when a conversation is analysed, and named by
+    police advisories when a campaign is written up. Both have to be able to
+    say the same thing, or a campaign matches nobody.
+
+    iMessage, email and phone calls were added after real advisories named
+    them: a September 2026 advisory covers phishing "via iMessage", a March one
+    covers phishing emails impersonating DBS, and government impersonation
+    typically begins with a call. Without them a campaign would have to be
+    filed as "unknown", which matches no one's channel history.
+    """
 
     WHATSAPP = "whatsapp"
     TELEGRAM = "telegram"
     SMS = "sms"
+    IMESSAGE = "imessage"
+    EMAIL = "email"
+    PHONE_CALL = "phone_call"
     WECHAT = "wechat"
     FACEBOOK = "facebook"
     INSTAGRAM = "instagram"

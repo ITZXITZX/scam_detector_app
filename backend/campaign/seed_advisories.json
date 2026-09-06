@@ -1,0 +1,76 @@
+[
+  {
+    "id": "2026-09-03-police-advisory-on-the-rise-in-cyber-extortion-scams-involvi",
+    "title": "Extortion scams using intimate images",
+    "body": "Scammers on dating apps and social media record intimate videos or collect photos, then demand payment threatening to share them. Police say: never send intimate images to people you've just met online, and never pay extortionists.",
+    "lureType": "sexual_service",
+    "tactics": [
+      "threat",
+      "secrecy",
+      "isolation"
+    ],
+    "channel": "unknown",
+    "claimedIdentity": "none",
+    "severity": "high",
+    "publishedOn": "2026-09-03",
+    "source": "https://www.police.gov.sg/Media-Hub/News/2026/09/20260903_police_advisory_on_the_rise_in_cyber_extortion_scams"
+  },
+  {
+    "id": "2026-09-02-police-advisory-on-phishing-scams-impersonating-dbs-and-shop",
+    "title": "Phishing messages impersonating DBS and Shopee on iMessage",
+    "body": "Scammers send fake alerts claiming a transaction needs urgent verification, then ask you to call a number and provide card details or OTP. DBS and Shopee never ask for card details, OTP, or login information over the phone.",
+    "lureType": "phishing",
+    "tactics": [
+      "urgency"
+    ],
+    "channel": "imessage",
+    "claimedIdentity": "platform_support",
+    "severity": "high",
+    "publishedOn": "2026-09-02",
+    "source": "https://www.police.gov.sg/Media-Hub/News/2026/09/20260902_police_advisory_on_phishing_scams_impersonating_dbs_and_shopee_via_imessage"
+  },
+  {
+    "id": "2026-03-27-20260327-advisory-on-phishing-scams-involving-emails-that-im",
+    "title": "Emails claiming your DBS or POSB digital token expired",
+    "body": "Scammers are sending emails that look like they're from DBS or POSB, asking you to activate or update your digital token by clicking a link. Banks never send clickable links via email—token setup only happens through the official app.",
+    "lureType": "phishing",
+    "tactics": [
+      "urgency"
+    ],
+    "channel": "email",
+    "claimedIdentity": "bank",
+    "severity": "high",
+    "publishedOn": "2026-03-27",
+    "source": "https://www.police.gov.sg/media-hub/news/2026/03/20260327_advisory_on_phishing_scams_involving_emails_that_impersonate_dbs_posb"
+  },
+  {
+    "id": "2025-01-24-20250124-police-advisory-on-ecommerce-scams-through-sale-of-",
+    "title": "Shopee product scams with off-app payments",
+    "body": "Scammers pose as Shopee sellers, offer discounts to move the chat to Telegram or WhatsApp, then ask for money that never arrives. Always complete purchases within the Shopee app—it protects you until you confirm you received the item.",
+    "lureType": "ecommerce",
+    "tactics": [
+      "flattery",
+      "urgency"
+    ],
+    "channel": "unknown",
+    "claimedIdentity": "none",
+    "severity": "high",
+    "publishedOn": "2025-01-24",
+    "source": "https://www.police.gov.sg/media-hub/news/2025/01/20250124_police_advisory_on_ecommerce_scams_through_sale_of_products"
+  },
+  {
+    "id": "2023-05-22-20230522-joint-advisory-on-fake-online-job-scams-impersonati",
+    "title": "Fake Shopee job offers on WhatsApp and Telegram",
+    "body": "Scammers pretend to be Shopee staff offering easy money for liking items or surveys, then ask you to pay upfront for a \"Shopee Assistant\" role on a fake website. Shopee never asks you to pre-pay money to secure a job, and real contact only comes through the official Shopee app or shopee.com email addresses.",
+    "lureType": "job",
+    "tactics": [
+      "flattery",
+      "reciprocity"
+    ],
+    "channel": "whatsapp",
+    "claimedIdentity": "platform_support",
+    "severity": "high",
+    "publishedOn": "2023-05-22",
+    "source": "https://www.police.gov.sg/media-hub/news/2023/20230522_joint_advisory_on_fake_online_job_scams_impersonating_shopee"
+  }
+]
