@@ -464,10 +464,17 @@ class _LlmCorrection(BaseModel):
 class _LlmVerdict(BaseModel):
     # No riskLevel or riskScore: the verdict is decided by pattern.scoring from
     # the labels, not by the model. This call explains a decision already made.
-    summary: str
+    # `summary` and `warnings` were removed from this schema rather than left
+    # unused. Nothing displayed either one - the advice headline replaced the
+    # summary, and the card shows fired checks instead of warnings - but the
+    # model was still generating both on every analysis, at roughly 100-150
+    # output tokens a time. A field the model must fill costs money whether or
+    # not anything reads it.
+    #
+    # The shim below still exposes `summary` and `warnings`; both are now
+    # filled from the deterministic side, where they cost nothing.
     flaggedMessageIndexes: list[int]
     corrections: list[_LlmCorrection]
-    warnings: list[str]
     # The advice the user acts on. `headline` is written; the steps are only
     # SELECTED, by index, from the official list the prompt supplies. Choosing
     # from a list rather than writing prose is what stops the helpline from
@@ -499,10 +506,6 @@ is unambiguous from context. Return the full corrected message text. Never \
 invent, complete, or paraphrase content that is not supported by the \
 transcription. If a message is garbled beyond confident repair, leave it out of \
 corrections and add a warning instead.
-- summary: one short sentence putting the verdict in plain words, drawing on \
-the reasons given. Do not contradict the verdict, soften it, or add a risk \
-rating of your own. If the verdict is COULDNT_CONFIRM, say that it could not be \
-confirmed - never that the conversation looks safe.
 - flaggedMessageIndexes: the specific messages the reasons refer to. Empty if \
 none.
 - history, when present, is what this person has checked before. Counts only: \
@@ -528,12 +531,6 @@ most urgent first. Choose only steps that fit what actually happened; leave out 
 the rest. You cannot add a step, and you must not restate one in your own \
 words: the exact published wording is what the user sees. Three or four is \
 usually enough, and an empty list means all of them are shown.
-- warnings: caveats about this analysis, not advice - advice belongs in the \
-fields above. Include one ONLY when it changes how much the user should trust \
-the verdict, such as part of the conversation being unreadable or apparently \
-missing. Write it as a plain sentence addressed to them. Never mention message \
-indexes, transcription mechanics, or your own confidence. Prefer an empty \
-list.
 """
 
 
@@ -644,18 +641,6 @@ def _describe_verdict(
         return fallback, _advice(default_headline, official_steps), {}
 
     valid = range(len(transcript))
-    analysis = ScamAnalysis(
-        riskLevel=risk_level,
-        riskScore=verdict.score,
-        summary=described.summary,
-        flaggedMessageIndexes=[i for i in described.flaggedMessageIndexes if i in valid],
-        # The checks' own reasons come first: they are the actual grounds for
-        # the verdict, and unlike the model's warnings they cannot vary per run.
-        warnings=list(verdict.reasons) + described.warnings,
-    )
-    corrections = {
-        c.index: c.text for c in described.corrections if c.index in valid and c.text.strip()
-    }
 
     # Render the chosen steps from the official text. Out-of-range indexes are
     # dropped rather than trusted, and duplicates collapsed, so a confused
@@ -666,6 +651,21 @@ def _describe_verdict(
             chosen.append(official_steps[i])
     advice = _advice(described.adviceHeadline.strip() or default_headline,
                      chosen or official_steps)
+
+    analysis = ScamAnalysis(
+        riskLevel=risk_level,
+        riskScore=verdict.score,
+        # The advice headline, rather than a second sentence generated for a
+        # field nothing renders.
+        summary=advice.headline,
+        flaggedMessageIndexes=[i for i in described.flaggedMessageIndexes if i in valid],
+        # The checks' own reasons. They are the actual grounds for the verdict
+        # and, unlike anything generated, cannot vary between runs.
+        warnings=list(verdict.reasons),
+    )
+    corrections = {
+        c.index: c.text for c in described.corrections if c.index in valid and c.text.strip()
+    }
     return analysis, advice, corrections
 
 
