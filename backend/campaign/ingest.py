@@ -17,7 +17,7 @@ from __future__ import annotations
 import os
 import re
 from dataclasses import dataclass
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 import anthropic
@@ -220,7 +220,10 @@ def draft_campaign(advisory: Advisory, article_text: str, model: str) -> Campaig
     except Exception:
         return None
 
-    published = advisory.published or date.today()
+    # UTC, because Campaign.is_active compares against the UTC date. Using the
+    # local date here meant a campaign created in the morning in Singapore was
+    # dated tomorrow in UTC and hid itself until the clocks caught up.
+    published = advisory.published or datetime.now(timezone.utc).date()
     slug = re.sub(r"[^a-z0-9]+", "-", advisory.title.lower()).strip("-")[:60]
 
     return Campaign(
