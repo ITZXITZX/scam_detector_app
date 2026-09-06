@@ -1,0 +1,48 @@
+# Domains that legitimately belong to organisations scammers impersonate.
+#
+# Checked in on purpose rather than fetched at runtime: a verdict must be
+# reproducible at a given commit, and a reviewer must be able to see what the
+# engine trusts. Adding a domain here means "a link to this is not, by itself,
+# suspicious", so additions belong in review like any other code change.
+#
+# Format:  <domain>  [brand tokens...]
+#
+# A leading "*." means the domain and all its subdomains. Blank lines and
+# "#" comments are ignored.
+#
+# Brand tokens drive lookalike detection. A host that uses one of these tokens
+# as a standalone label component, while being owned by a domain that is NOT on
+# this list, is impersonating that brand. Matching is on whole tokens only:
+# "mas-verify.sg-alert.test" splits to [mas, verify, sg, alert, test] and hits
+# "mas", while "christmas-deals.com" splits to [christmas, deals, com] and does
+# not. Substring matching would flag Christmas; token matching does not.
+#
+# Only add a token if it is distinctive as a standalone word. "sg" or "app"
+# would match everything and must not be listed.
+
+# Singapore government. Covers police.gov.sg, mas.gov.sg, iras.gov.sg, cpf.gov.sg
+*.gov.sg            singpass  mas  spf  cpf  iras  ica  mom  moh  scamshield
+
+# Banks
+dbs.com.sg          dbs
+posb.com.sg         posb
+ocbc.com            ocbc
+uob.com.sg          uob
+scb.com.sg          standardchartered
+citibank.com.sg     citibank
+maybank.com.sg      maybank
+hsbc.com.sg         hsbc
+trust.sg
+
+# Payments
+paynow.com.sg       paynow
+
+# Couriers
+singpost.com        singpost
+ninjavan.co         ninjavan
+speedpost.com.sg    speedpost
+
+# Telcos
+singtel.com         singtel
+starhub.com         starhub
+m1.com.sg

@@ -7,3 +7,4 @@ anthropic>=1.0
 rapidocr==3.9.2
 onnxruntime==1.29.0
 python-dotenv>=1.0
+pyyaml>=6.0

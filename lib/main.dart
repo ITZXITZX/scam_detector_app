@@ -6,6 +6,8 @@ import 'package:flutter_screen_recording/flutter_screen_recording.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:permission_handler/permission_handler.dart';
 
+import 'device_user.dart';
+import 'profile_screen.dart';
 import 'recording_frames_api.dart';
 
 /// Bundled screen recording used by the "Use sample recording" test button.
@@ -44,6 +46,7 @@ class _RecordingHomePageState extends State<RecordingHomePage> {
   String? _errorMessage;
   FramesResult? _frames;
   AnalyzeResult? _result;
+  RiskProfile? _profile;
 
   Future<bool> _ensurePermissions() async {
     // Android 13+ requires explicit notification permission for the
@@ -119,10 +122,23 @@ class _RecordingHomePageState extends State<RecordingHomePage> {
     });
 
     try {
-      final result = await RecordingFramesApi.analyzeRecording(recordingId);
+      final userId = await DeviceUser.id();
+      final result = await RecordingFramesApi.analyzeRecording(
+        recordingId,
+        userId: userId,
+      );
+      // Read the profile back so the result screen can say what changed. A
+      // failure here must not cost the user their verdict, so it is swallowed.
+      RiskProfile? profile;
+      try {
+        profile = await RecordingFramesApi.fetchProfile(userId);
+      } catch (_) {
+        profile = null;
+      }
       setState(() {
         _stage = _Stage.done;
         _result = result;
+        _profile = profile;
       });
     } catch (err) {
       setState(() {
@@ -181,6 +197,7 @@ class _RecordingHomePageState extends State<RecordingHomePage> {
       _recordingPath = null;
       _frames = null;
       _result = null;
+      _profile = null;
       _errorMessage = null;
     });
   }
@@ -188,7 +205,16 @@ class _RecordingHomePageState extends State<RecordingHomePage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Conversation Recorder')),
+      appBar: AppBar(
+        title: const Text('Conversation Recorder'),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.person_outline),
+            tooltip: 'Your risk pattern',
+            onPressed: _openProfile,
+          ),
+        ],
+      ),
       body: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
@@ -204,6 +230,14 @@ class _RecordingHomePageState extends State<RecordingHomePage> {
           ],
         ),
       ),
+    );
+  }
+
+  Future<void> _openProfile() async {
+    final userId = await DeviceUser.id();
+    if (!mounted) return;
+    await Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => ProfileScreen(userId: userId)),
     );
   }
 
@@ -294,47 +328,141 @@ class _RecordingHomePageState extends State<RecordingHomePage> {
     }
   }
 
-  Widget _buildRiskBanner(ScamAnalysis analysis) {
-    if (analysis.riskLevel == 'unavailable') {
-      return Padding(
-        padding: const EdgeInsets.only(bottom: 12),
-        child: Text(
-          'AI scam analysis unavailable (no API key configured)',
-          style: Theme.of(context).textTheme.bodySmall,
-        ),
-      );
-    }
-    final (color, icon, label) = switch (analysis.riskLevel) {
-      'high' => (Colors.red.shade100, Icons.warning_amber_rounded, 'LIKELY SCAM'),
-      'medium' => (Colors.amber.shade100, Icons.help_outline, 'SUSPICIOUS'),
-      _ => (Colors.green.shade100, Icons.check_circle_outline, 'LOOKS SAFE'),
-    };
+  /// The verdict, what to do about it, and - folded away - why.
+  ///
+  /// What to do comes first and stays open. Someone deciding whether to hang up
+  /// needs the instruction, not the evidence for it; the reasons are
+  /// justification they can ask for. The previous version showed eight bullets
+  /// mixing both, which is how a warning stops being read.
+  ///
+  /// No score. The number is deterministic now, but its weights are still
+  /// judgement calls, and "55" next to a threshold of 60 implies a precision
+  /// that is not there.
+  Widget _buildVerdictCard(AnalyzeResult result) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final isScam = result.verdict!.outcome == 'SCAM';
+    final advice = result.advice;
+    final fired = result.checks.where((c) => c.fired && c.detail.isNotEmpty).toList();
+
     return Container(
       margin: const EdgeInsets.only(bottom: 16),
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(color: color, borderRadius: BorderRadius.circular(12)),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: isScam ? scheme.errorContainer : scheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(12),
+      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: [
-              Icon(icon, size: 20),
+              Icon(isScam ? Icons.warning_amber_rounded : Icons.help_outline, size: 20),
               const SizedBox(width: 8),
-              Text(label, style: Theme.of(context).textTheme.titleMedium),
-              const Spacer(),
-              Text('risk ${analysis.riskScore}/100'),
+              Text(
+                isScam ? 'LIKELY SCAM' : 'COULD NOT CONFIRM',
+                style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
+              ),
             ],
           ),
-          const SizedBox(height: 4),
-          Text(analysis.summary),
-          for (final warning in analysis.warnings)
-            Padding(
-              padding: const EdgeInsets.only(top: 4),
-              child: Text('• $warning', style: Theme.of(context).textTheme.bodySmall),
+          if (advice != null && advice.headline.isNotEmpty) ...[
+            const SizedBox(height: 8),
+            Text(advice.headline, style: theme.textTheme.bodyLarge),
+          ],
+          if (advice != null && advice.whatToDo.isNotEmpty) ...[
+            const SizedBox(height: 16),
+            Text('What to do',
+                style: theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.bold)),
+            const SizedBox(height: 6),
+            for (final (index, step) in advice.whatToDo.indexed)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 6),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    SizedBox(width: 22, child: Text('${index + 1}.')),
+                    Expanded(child: Text(step)),
+                  ],
+                ),
+              ),
+            if (advice.source.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.only(top: 4),
+                child: Text('Guidance from ScamShield',
+                    style: theme.textTheme.labelSmall),
+              ),
+          ],
+          if (fired.isNotEmpty) ...[
+            const SizedBox(height: 8),
+            Theme(
+              // The default divider draws lines across the coloured card.
+              data: theme.copyWith(dividerColor: Colors.transparent),
+              child: ExpansionTile(
+                title: Text('Why we flagged this',
+                    style: theme.textTheme.titleSmall),
+                tilePadding: EdgeInsets.zero,
+                childrenPadding: const EdgeInsets.only(bottom: 8),
+                expandedCrossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  for (final check in fired)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 4),
+                      child: Text('• ${check.detail}',
+                          style: theme.textTheme.bodySmall),
+                    ),
+                ],
+              ),
             ),
+          ],
         ],
       ),
     );
+  }
+
+  Widget _buildPatternShift(AnalyzeResult result) {
+    final profile = _profile;
+    final lure = result.signals?.lureType;
+    if (profile == null || lure == null || lure == 'none') {
+      return const SizedBox.shrink();
+    }
+    final count = profile.lureCounts[lure] ?? 0;
+    if (count < 2) return const SizedBox.shrink();
+
+    final spaced = lure.replaceAll('_', ' ');
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 16),
+      child: InkWell(
+        onTap: _openProfile,
+        child: Row(
+          children: [
+            const Icon(Icons.trending_up, size: 18),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                '${_ordinal(count)} $spaced scam you have checked. '
+                'Your risk pattern updated.',
+                style: Theme.of(context).textTheme.bodyMedium,
+              ),
+            ),
+            const Icon(Icons.chevron_right, size: 18),
+          ],
+        ),
+      ),
+    );
+  }
+
+  String _ordinal(int n) {
+    if (n % 100 >= 11 && n % 100 <= 13) return '${n}th';
+    switch (n % 10) {
+      case 1:
+        return '${n}st';
+      case 2:
+        return '${n}nd';
+      case 3:
+        return '${n}rd';
+      default:
+        return '${n}th';
+    }
   }
 
   Widget _buildTranscriptBubble(TranscriptMessage message, {required bool flagged}) {
@@ -375,7 +503,8 @@ class _RecordingHomePageState extends State<RecordingHomePage> {
     final flagged = result?.analysis?.flaggedMessageIndexes.toSet() ?? const <int>{};
     return ListView(
       children: [
-        if (result?.analysis != null) _buildRiskBanner(result!.analysis!),
+        if (result?.verdict != null) _buildVerdictCard(result!),
+        if (result != null) _buildPatternShift(result),
         if (result != null && result.transcript.isNotEmpty) ...[
           Text('Reconstructed conversation', style: Theme.of(context).textTheme.titleMedium),
           const SizedBox(height: 8),

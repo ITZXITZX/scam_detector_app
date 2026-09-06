@@ -47,6 +47,8 @@ dependencies:
   # Lets the user analyse screenshots already on the phone, instead of
   # recording the screen.
   image_picker: ^1.1.2
+  # Persists the generated device id so encounters accumulate into one profile.
+  shared_preferences: ^2.3.2
 
 dev_dependencies:
   flutter_test:

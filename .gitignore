@@ -63,3 +63,6 @@ backend/.venv/
 # Local secrets (never commit)
 .env
 backend/.env
+
+# Local profile database (per-device demo data, not source)
+backend/profiles.db
