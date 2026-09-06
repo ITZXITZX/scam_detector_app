@@ -54,7 +54,7 @@ from pattern.taxonomy import (
 )
 from campaign.ingest import draft_campaign, fetch_advisories, fetch_article
 from campaign.matcher import evaluate
-from campaign.store import approve_campaign, load_campaigns, save_campaign
+from campaign.store import approve_campaign, load_campaigns, save_campaign, seed_campaigns
 from profile.demo import load_sample_profile
 from profile.model import Encounter, Profile
 from profile.store import clear_encounters, get_profile, record_encounter
@@ -1096,3 +1096,15 @@ async def _sweep_old_recordings() -> None:
 @app.on_event("startup")
 async def _start_sweeper() -> None:
     asyncio.create_task(_sweep_old_recordings())
+
+
+@app.on_event("startup")
+async def _seed_the_feed() -> None:
+    """Give a fresh install a feed to show without anyone running the scraper.
+
+    Only fires when the store is empty, so it cannot bring back a campaign that
+    was removed on purpose.
+    """
+    added = await asyncio.to_thread(seed_campaigns)
+    if added:
+        print(f"Seeded {added} police advisories into an empty campaign store")

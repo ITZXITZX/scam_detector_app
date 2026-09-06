@@ -11,6 +11,7 @@ A warning that should not have been sent cannot be taken back.
 from __future__ import annotations
 
 import sys
+import tempfile
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
@@ -248,3 +249,71 @@ def test_approving_a_draft_makes_it_sendable(tmp_path):
 # know what it has already shown, and keeping a per-person send log on the
 # server means holding a list of who is vulnerable to what. `select_for_user`
 # still takes `already_sent` and `sent_this_week`, so the device supplies them.
+
+
+# --------------------------------------------------------------------------
+# The seeded feed: what someone sees before they have scraped anything
+# --------------------------------------------------------------------------
+
+
+def test_a_fresh_install_has_a_feed_without_scraping_anything():
+    """The database is gitignored, so a new checkout starts with nothing.
+
+    An empty feed is indistinguishable from a broken one, and the scraper needs
+    an API key and a reachable police.gov.sg to fill it.
+    """
+    from campaign.store import seed_campaigns
+
+    db = Path(tempfile.mkdtemp()) / "fresh.db"
+    assert load_campaigns(approved_only=True, db_path=db) == []
+    assert seed_campaigns(db_path=db) == 5
+    assert len(load_campaigns(approved_only=True, db_path=db)) == 5
+
+
+def test_seeding_never_runs_twice():
+    """It must not resurrect a campaign that was removed on purpose."""
+    from campaign.store import seed_campaigns
+
+    db = Path(tempfile.mkdtemp()) / "fresh.db"
+    seed_campaigns(db_path=db)
+    assert seed_campaigns(db_path=db) == 0
+
+
+def test_seeded_advisories_do_not_expire_during_a_demo():
+    """A scraped campaign lives 30 days; a seeded one has to still be there in
+    six months, or the app goes blank with no explanation."""
+    from campaign.store import seed_campaigns
+
+    db = Path(tempfile.mkdtemp()) / "fresh.db"
+    seed_campaigns(db_path=db)
+    for c in load_campaigns(approved_only=True, db_path=db):
+        assert c.activeUntil is None
+        assert c.is_active(on=date(2027, 12, 31))
+
+
+def test_seeded_advisories_are_dated_by_the_advisory_not_the_scrape():
+    """The card prints this date next to "Singapore Police Force"; a scrape
+    date there would attribute the wrong day to a real advisory."""
+    from campaign.store import seed_campaigns
+
+    db = Path(tempfile.mkdtemp()) / "fresh.db"
+    seed_campaigns(db_path=db)
+    for c in load_campaigns(approved_only=True, db_path=db):
+        stamp = c.activeFrom.strftime("%Y%m%d")
+        assert stamp in c.source.replace("-", ""), c.source
+
+
+def test_a_seeded_advisory_still_matches_a_profile():
+    """Seeding is only worth doing if the cards behave like scraped ones."""
+    from campaign.store import seed_campaigns
+
+    db = Path(tempfile.mkdtemp()) / "fresh.db"
+    seed_campaigns(db_path=db)
+    phishing = [
+        c
+        for c in load_campaigns(approved_only=True, db_path=db)
+        if c.lureType is LureType.PHISHING
+    ]
+    assert phishing
+    assert evaluate(phishing[0], profile_with(lure=LureType.PHISHING)).matched
+    assert not evaluate(phishing[0], build_profile("new", [], now=NOW)).matched
