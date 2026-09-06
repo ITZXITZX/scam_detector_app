@@ -21,7 +21,7 @@ from pattern.taxonomy import (  # noqa: E402
     LureType,
     PressureTactic,
 )
-from profile.model import HALF_LIFE_DAYS, Encounter, build_profile  # noqa: E402
+from profile.model import Encounter, build_profile  # noqa: E402
 from profile.store import get_profile, load_encounters, record_encounter  # noqa: E402
 
 NOW = datetime(2026, 9, 6, tzinfo=timezone.utc)
@@ -49,65 +49,57 @@ def encounter(
 
 
 # --------------------------------------------------------------------------
-# Rule: recent matters more
+# Counts
+#
+# Vulnerability is a plain count of how many times each lure has been used on
+# this person. The age weighting that used to fade old encounters was removed
+# because the number is shown to the user and "authority 8.14" is not readable.
+# Every encounter still stores its timestamp and depth, so weighting can return
+# without a migration.
 # --------------------------------------------------------------------------
 
 
-def test_a_vulnerability_halves_over_one_half_life():
-    fresh = build_profile("u1", [encounter(days_ago=0)], now=NOW)
-    old = build_profile("u1", [encounter(days_ago=HALF_LIFE_DAYS)], now=NOW)
-    assert old.vulnerability["authority"] == pytest.approx(
-        fresh.vulnerability["authority"] / 2, rel=1e-3
-    )
-
-
-def test_an_old_vulnerability_fades_below_a_recent_one():
-    """Old vulnerabilities fade if they stop recurring: two encounters a year
-    ago should not outweigh one from last week."""
+def test_vulnerability_counts_encounters():
     profile = build_profile(
         "u1",
-        [
-            encounter(days_ago=365, lure=LureType.PARCEL),
-            encounter(days_ago=365, lure=LureType.PARCEL),
-            encounter(days_ago=7, lure=LureType.AUTHORITY),
-        ],
+        [encounter(), encounter(), encounter(lure=LureType.PHISHING)],
         now=NOW,
     )
-    assert profile.vulnerability["authority"] > profile.vulnerability["parcel"]
+    assert profile.vulnerability == {"authority": 2, "phishing": 1}
     assert profile.top_lure() == "authority"
 
 
-def test_repeated_recent_encounters_accumulate():
-    once = build_profile("u1", [encounter(days_ago=1)], now=NOW)
-    thrice = build_profile("u1", [encounter(days_ago=1)] * 3, now=NOW)
-    assert thrice.vulnerability["authority"] > once.vulnerability["authority"]
+def test_counts_are_whole_numbers():
+    """Shown to the user, so they have to be readable as facts."""
+    profile = build_profile("u1", [encounter()] * 3, now=NOW)
+    assert profile.vulnerability["authority"] == 3
+    assert all(isinstance(v, int) for v in profile.vulnerability.values())
+    assert all(isinstance(v, int) for v in profile.tacticSensitivity.values())
 
 
-# --------------------------------------------------------------------------
-# Rule: depth matters
-# --------------------------------------------------------------------------
+def test_age_no_longer_changes_the_count():
+    fresh = build_profile("u1", [encounter(days_ago=0)], now=NOW)
+    ancient = build_profile("u1", [encounter(days_ago=3000)], now=NOW)
+    assert fresh.vulnerability == ancient.vulnerability
 
 
-def test_nearly_paying_counts_for_more_than_checking_early():
-    """Someone who nearly transferred money counts more than someone who
-    checked immediately."""
-    cautious = build_profile(
-        "u1", [encounter(depth=EngagementDepth.NO_REPLY)], now=NOW
-    )
+def test_depth_no_longer_changes_the_count():
+    cautious = build_profile("u1", [encounter(depth=EngagementDepth.NO_REPLY)], now=NOW)
     exposed = build_profile(
         "u1", [encounter(depth=EngagementDepth.INITIATED_PAYMENT)], now=NOW
     )
-    assert exposed.vulnerability["authority"] > cautious.vulnerability["authority"]
+    assert cautious.vulnerability == exposed.vulnerability
 
 
-def test_one_deep_encounter_outweighs_several_shallow_ones():
-    shallow = build_profile(
-        "u1", [encounter(depth=EngagementDepth.NO_REPLY)] * 5, now=NOW
+def test_depth_and_timestamp_are_still_recorded(tmp_path):
+    """The ingredients for weighting survive, even though nothing uses them."""
+    db = tmp_path / "t.db"
+    record_encounter(
+        encounter(days_ago=12, depth=EngagementDepth.INITIATED_PAYMENT), db_path=db
     )
-    deep = build_profile(
-        "u1", [encounter(depth=EngagementDepth.SHARED_CREDENTIALS)], now=NOW
-    )
-    assert deep.vulnerability["authority"] > shallow.vulnerability["authority"] / 5
+    loaded = load_encounters("u1", db_path=db)[0]
+    assert loaded.engagementDepth is EngagementDepth.INITIATED_PAYMENT
+    assert loaded.at == NOW - timedelta(days=12)
 
 
 # --------------------------------------------------------------------------
@@ -116,8 +108,8 @@ def test_one_deep_encounter_outweighs_several_shallow_ones():
 
 
 def test_profile_describes_the_users_shape():
-    """Highly vulnerable to authority scams, not at all to parcel scams.
-    Usually targeted on WhatsApp."""
+    """Targeted mostly with authority scams, never with parcel scams,
+    usually on WhatsApp."""
     profile = build_profile(
         "u1",
         [
@@ -132,7 +124,7 @@ def test_profile_describes_the_users_shape():
     )
     assert profile.top_lure() == "authority"
     assert profile.usual_channel() == "whatsapp"
-    assert "parcel" not in profile.vulnerability
+    assert "phishing" not in profile.vulnerability
     assert profile.tacticSensitivity["urgency"] > profile.tacticSensitivity["isolation"]
 
 
@@ -145,12 +137,12 @@ def test_checking_something_harmless_still_counts():
     """
     profile = build_profile(
         "u1",
-        [encounter(lure=LureType.PARCEL, outcome="COULDNT_CONFIRM",
+        [encounter(lure=LureType.PHISHING, outcome="COULDNT_CONFIRM",
                    depth=EngagementDepth.NO_REPLY)],
         now=NOW,
     )
     assert profile.encounterCount == 1
-    assert "parcel" in profile.vulnerability
+    assert "phishing" in profile.vulnerability
 
 
 def test_unlabelled_lure_does_not_create_a_vulnerability():
