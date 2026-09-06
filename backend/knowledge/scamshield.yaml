@@ -1,0 +1,263 @@
+# Official guidance per scam type, from ScamShield.
+#
+# Keyed by LureType, so the advice layer selects an entry with a dictionary
+# lookup on a label the pattern engine has already produced. There is no
+# retrieval step: with twelve categories and a known key, similarity search
+# would add a dependency and a failure mode to solve a problem `dict[lure]`
+# solves exactly.
+#
+# `neverHappens` holds the categorical statements. Those are the raw material
+# for deterministic checks - C12 to C16 came from these lines - so adding a
+# check becomes a matter of pointing at one, and its provenance stays visible.
+#
+# Source and retrieval date are recorded per entry because a claim like "banks
+# never send links by SMS" is only as good as who said it and when. Re-scrape
+# occasionally; this is reference material, not a live feed.
+
+authority:
+  title: Government officials impersonation
+  source: https://www.scamshield.gov.sg/i-want-protection-from-scams/learn-to-recognise-scams/government-officials-impersonation-scams/
+  retrieved: 2026-09-06
+  keyTakeaway: >-
+    Government officials will never ask you to transfer money over a phone call.
+    SMSes from the government come from the gov.sg Sender ID.
+  neverHappens:
+    - Government officials will never ask you to transfer money
+    - They will never ask you to disclose bank log-in details
+    - They will never ask you to install apps from unofficial app stores
+    - They will never transfer your call to the Police
+    - SPF officers will never request your banking, SingPass or CPF information
+    - Overseas law enforcement has no power to make you assist their investigations
+  redFlags:
+    - Unsolicited call or in-app video call claiming to be SPF or MAS
+    - Accusation that you are involved in criminal activity
+    - Instruction to move money to a "safe account" for investigation
+    - Being asked to show your identity card or bank cards on a video call
+  whatToDo:
+    - Do not transfer any money, whatever the caller says
+    - Hang up and call the ScamShield Helpline on 1799 to check
+    - Tell someone you trust before you act
+    - Call your bank immediately and make a police report if you have already paid
+
+investment:
+  title: Investment scams
+  source: https://www.scamshield.gov.sg/i-want-protection-from-scams/learn-to-recognise-scams/investment-scams/
+  retrieved: 2026-09-06
+  keyTakeaway: >-
+    Be cautious of investment opportunities found online or recommended by
+    someone you have never met, especially if they promise high returns at low
+    risk. Deal only with entities regulated by MAS.
+  neverHappens:
+    - A genuine return does not come without matching risk
+  redFlags:
+    - Promises of high returns at low or no risk
+    - Pressure tactics such as limited offers, timed gifts or rebates
+    - The company is not on MAS's Financial Institutions Directory
+    - Small early "profits" used to encourage a larger transfer
+    - Difficulty withdrawing your money
+  whatToDo:
+    - Check MAS's Financial Institutions Directory and Investor Alert List
+    - Call the company's official hotline, not a number you were given
+    - Call 1799 if you are unsure
+    - Talk to someone you trust before transferring anything
+
+job:
+  title: Job scams
+  source: https://www.scamshield.gov.sg/i-want-protection-from-scams/learn-to-recognise-scams/job-scams/
+  retrieved: 2026-09-06
+  keyTakeaway: >-
+    Be wary of online jobs promising commissions for simple tasks. It is likely
+    a scam if the job requires you to transfer money or make advance payments.
+  neverHappens:
+    - A legitimate job does not require payment before you start
+    - A legitimate job does not need your Singpass credentials
+  redFlags:
+    - Paying upfront before starting the job
+    - Using your own money to complete tasks
+    - Using your personal bank account as part of the job
+    - Being asked for Singpass credentials or to scan a Singpass QR code
+  whatToDo:
+    - Contact the company directly to check the offer is real
+    - Never use your own bank account or money for work tasks
+    - Call 1799 if you are unsure
+
+ecommerce:
+  title: E-commerce scams
+  source: https://www.scamshield.gov.sg/i-want-protection-from-scams/learn-to-recognise-scams/e-commerce-scams/
+  retrieved: 2026-09-06
+  keyTakeaway: >-
+    Be cautious of deals that seem too good to be true. As a seller, verify
+    payment has arrived before sending anything.
+  neverHappens:
+    - A genuine platform does not need you to pay a seller directly
+  redFlags:
+    - An attractive price available for a limited time only
+    - Payment asked for directly rather than through the platform
+    - Links or third-party apps sent by message to pay or get a refund
+    - Extra customs or delivery fees after the deal is agreed
+  whatToDo:
+    - Pay only through the platform's own payment option
+    - Do not click links or scan QR codes sent by a seller
+    - Check the platform's Transaction Safety Rating
+    - Call 1799 if you are unsure
+
+phishing:
+  title: Phishing scams
+  source: https://www.scamshield.gov.sg/i-want-protection-from-scams/learn-to-recognise-scams/phishing-scams/
+  retrieved: 2026-09-06
+  keyTakeaway: >-
+    Never click links in unsolicited messages, even when they appear to come
+    from a bank or government agency. Never share passwords, banking
+    credentials or card details.
+  neverHappens:
+    - Banks will never send you clickable links by SMS
+    - IRAS does not process tax refunds to credit or debit cards
+    - IRAS does not send tax documents or refund letters by email
+  redFlags:
+    - Clickable links in unsolicited emails, messages or advertisements
+    - Spoofed web addresses, for example m1cr0soft.1234.com.co
+    - A page without https or a lock icon
+    - Requests for one-time passwords, personal or banking details
+    - Prompts to download attachments or apps outside official app stores
+  whatToDo:
+    - Do not use links or QR codes from unknown senders to pay or transfer
+    - Open your banking app directly instead of following a link
+    - Never share one-time passwords with anyone
+    - Call 1799 if you are unsure whether a message is genuine
+    - Call your bank and make a police report if you have already entered details
+
+fake_friend:
+  title: Fake friend call scams
+  source: https://www.scamshield.gov.sg/i-want-protection-from-scams/learn-to-recognise-scams/fake-friend-call-scams/
+  retrieved: 2026-09-06
+  keyTakeaway: >-
+    Be wary of calls from unknown numbers asking for urgent financial help.
+    Verify who is calling before sending anything.
+  neverHappens:
+    - A real friend can be reached on the number you already have for them
+  redFlags:
+    - A caller from an unknown number asking you to guess who they are
+    - A claim that they lost their phone and changed number
+    - A request for urgent financial help soon after making contact
+    - Being told to click links or install apps to help them
+  whatToDo:
+    - Call the person back on the number you already have for them
+    - Check with someone who also knows them
+    - Call 1799 if you are unsure
+
+loan:
+  title: Loan scams
+  source: https://www.scamshield.gov.sg/i-want-protection-from-scams/learn-to-recognise-scams/loan-scams/
+  retrieved: 2026-09-06
+  keyTakeaway: >-
+    Be wary of loan advertisements on social media or unsolicited messages
+    offering fast cash. Never pay upfront fees to receive a loan.
+  neverHappens:
+    - Any unsolicited loan offer is a scam
+    - Licensed moneylenders are prohibited from advertising their services
+    - A licensed moneylender requires you to visit their business premises in person
+  redFlags:
+    - A loan advertised on social media or sent to you unprompted
+    - Approval handled entirely online or by phone
+    - Being asked to transfer money before the loan is disbursed
+  whatToDo:
+    - Check the Registry of Moneylenders for licensed lenders
+    - Do not transfer any money to receive a loan
+    - Call 1799 if you are unsure
+
+tech_support:
+  title: Tech support scams
+  source: https://www.scamshield.gov.sg/i-want-protection-from-scams/learn-to-recognise-scams/tech-support-scams/
+  retrieved: 2026-09-06
+  keyTakeaway: >-
+    Legitimate tech companies never send pop-up alerts asking you to call a
+    number. Never install remote access software at the request of an
+    unsolicited caller.
+  neverHappens:
+    - Legitimate software companies never put a helpline number in a pop-up
+    - Reputable organisations do not contact you unsolicited about your device
+  redFlags:
+    - A pop-up claiming your device is compromised, with a number to call
+    - Being asked to install AnyDesk, UltraViewer, ConnectWise or similar
+    - Being asked to log into your bank while they are connected
+    - Payment demanded in bank transfers, gift cards or cryptocurrency
+  whatToDo:
+    - Do not install remote access software for anyone who contacted you first
+    - Close the pop-up and contact the manufacturer through their official site
+    - Call 1799 if you are unsure
+    - Call your bank immediately if you already gave them access
+
+insurance:
+  title: Insurance service scams
+  source: https://www.scamshield.gov.sg/i-want-protection-from-scams/learn-to-recognise-scams/insurance-service-scams/
+  retrieved: 2026-09-06
+  keyTakeaway: >-
+    Legitimate insurers and government officials never ask you to transfer
+    money or share personal information over unsolicited calls or messages.
+  neverHappens:
+    - An insurer does not need an MAS officer to cancel your policy
+  redFlags:
+    - An unsolicited call or message about a policy you do not recognise
+    - Urgency about payment, renewal, cancellation or verification
+    - Being redirected to someone claiming to be from MAS
+    - Being guided through banking with WhatsApp screen sharing
+  whatToDo:
+    - Contact your insurer directly using the number on your policy documents
+    - Never share banking details or one-time passwords
+    - Call 1799 if you are unsure
+
+romance:
+  title: Internet love scams
+  source: https://www.scamshield.gov.sg/i-want-protection-from-scams/learn-to-recognise-scams/internet-love-scams/
+  retrieved: 2026-09-06
+  keyTakeaway: >-
+    Do not transfer money or send gift cards to someone you have never met in
+    person.
+  neverHappens:
+    - Someone who will not meet or video call cannot be verified
+  redFlags:
+    - Professing love quickly without meeting
+    - Avoiding video calls and meet-ups
+    - Emergencies requiring urgent money, often business or travel related
+    - An investment opportunity introduced once trust is established
+  whatToDo:
+    - Do not send money or gift cards to someone you have not met
+    - Talk to a friend or family member about the relationship
+    - Call 1799 if you are unsure
+
+sexual_service:
+  title: Sexual service scams
+  source: https://www.scamshield.gov.sg/i-want-protection-from-scams/learn-to-recognise-scams/sexual-service-scams/
+  retrieved: 2026-09-06
+  keyTakeaway: >-
+    Be wary of online listings offering escort or massage services. Do not make
+    upfront payments for services offered online.
+  neverHappens:
+    - A genuine service does not require payment in game credits or gift cards
+  redFlags:
+    - An unsolicited offer of sexual services online
+    - A deposit demanded before any meeting
+    - Payment requested via AXS game credits or gift cards
+    - Being asked to install an app for a video call
+    - Threats to share images or conversations unless you pay
+  whatToDo:
+    - Do not pay in gift cards or game credits
+    - Do not install apps sent to you for video calls
+    - Make a police report if you are being threatened, and do not pay again
+    - Call 1799 if you are unsure
+
+other:
+  title: Scams outside ScamShield's named categories
+  source: https://www.scamshield.gov.sg/
+  retrieved: 2026-09-06
+  keyTakeaway: >-
+    If you are unsure whether something is a scam, check before you act.
+  neverHappens: []
+  redFlags:
+    - An offer of money, goods or a benefit you never asked for
+    - A stranger whose identity you cannot verify
+    - Pressure to act quickly or to keep the matter private
+  whatToDo:
+    - Do not transfer money or share personal details
+    - Call the ScamShield Helpline on 1799 to check
+    - Talk to someone you trust before acting

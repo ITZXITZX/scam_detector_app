@@ -39,6 +39,7 @@ from fastapi.staticfiles import StaticFiles
 from PIL import Image
 from pydantic import BaseModel
 
+from knowledge import guidance_for
 from pattern.scoring import Outcome, Verdict, decide
 from pattern.taxonomy import (
     Channel,
@@ -485,6 +486,12 @@ rating of your own. If the verdict is COULDNT_CONFIRM, say that it could not be 
 confirmed - never that the conversation looks safe.
 - flaggedMessageIndexes: the specific messages the reasons refer to. Empty if \
 none.
+- officialGuidance, when present, is what Singapore's anti-scam agencies \
+publish about this kind of scam. Draw your advice from it rather than from \
+memory, and use the helpline it names. Do not invent numbers, websites or \
+agencies that are not in it or in the conversation. It describes the category \
+in general, so prefer the parts that match what actually happened here and stay \
+silent about the parts that do not.
 - warnings: shown directly to the phone's owner, who may not be technical and \
 is deciding right now whether to hang up. Include a warning ONLY when it would \
 change what they do or how much they trust this verdict, such as part of the \
@@ -497,7 +504,7 @@ action is noise that makes the real ones easier to ignore.
 
 
 def _describe_verdict(
-    transcript: list[dict], verdict: Verdict
+    transcript: list[dict], verdict: Verdict, signals: Signals
 ) -> tuple[ScamAnalysis, dict[int, str]]:
     """Ask Claude to put an already-decided verdict into plain language.
 
@@ -524,9 +531,16 @@ def _describe_verdict(
     if not transcript or not os.environ.get("ANTHROPIC_API_KEY"):
         return fallback, {}
 
+    # The published guidance for this scam type, selected by the label the
+    # pattern engine produced. Advice used to vary between runs and cite
+    # whichever helpline the model recalled; this gives it official wording to
+    # work from instead.
+    guidance = guidance_for(signals.lureType)
+
     payload = {
         "verdict": verdict.outcome.value,
         "reasons": list(verdict.reasons),
+        "officialGuidance": guidance.as_prompt_context() if guidance else None,
         "messages": [
             {
                 "index": i,
@@ -695,7 +709,9 @@ async def analyze_recording(recording_id: str, userId: str = "") -> AnalyzeRespo
     # sits between the signals and the outcome.
     verdict = decide(signals)
 
-    analysis, corrections = await asyncio.to_thread(_describe_verdict, transcript, verdict)
+    analysis, corrections = await asyncio.to_thread(
+        _describe_verdict, transcript, verdict, signals
+    )
     for i, corrected_text in corrections.items():
         transcript[i]["text"] = corrected_text
 
