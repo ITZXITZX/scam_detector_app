@@ -100,15 +100,134 @@ class FramesResult {
       );
 }
 
+/// The taxonomy labels the deterministic checks ran against.
+///
+/// Exposed so a verdict can be reproduced from the response alone, rather than
+/// taken on trust.
+class SignalSummary {
+  final String lureType;
+  final List<String> pressureTactics;
+  final List<String> requestedActions;
+  final String claimedIdentity;
+  final String channel;
+  final String engagementDepth;
+  final List<String> urls;
+
+  SignalSummary({
+    required this.lureType,
+    required this.pressureTactics,
+    required this.requestedActions,
+    required this.claimedIdentity,
+    required this.channel,
+    required this.engagementDepth,
+    required this.urls,
+  });
+
+  factory SignalSummary.fromJson(Map<String, dynamic> json) => SignalSummary(
+        lureType: json['lureType'] as String? ?? 'none',
+        pressureTactics:
+            (json['pressureTactics'] as List? ?? const []).cast<String>(),
+        requestedActions:
+            (json['requestedActions'] as List? ?? const []).cast<String>(),
+        claimedIdentity: json['claimedIdentity'] as String? ?? 'none',
+        channel: json['channel'] as String? ?? 'unknown',
+        engagementDepth: json['engagementDepth'] as String? ?? 'no_reply',
+        urls: (json['urls'] as List? ?? const []).cast<String>(),
+      );
+}
+
+/// One deterministic check and whether it fired.
+class CheckOutcome {
+  final String id;
+  final bool fired;
+  final String detail;
+
+  CheckOutcome({required this.id, required this.fired, required this.detail});
+
+  factory CheckOutcome.fromJson(Map<String, dynamic> json) => CheckOutcome(
+        id: json['id'] as String,
+        fired: json['fired'] as bool,
+        detail: json['detail'] as String? ?? '',
+      );
+}
+
+/// The outcome the checks decided. Never "safe": only SCAM or COULDNT_CONFIRM.
+class VerdictSummary {
+  final String outcome;
+  final int score;
+  final List<String> hardTriggered;
+
+  VerdictSummary({
+    required this.outcome,
+    required this.score,
+    required this.hardTriggered,
+  });
+
+  factory VerdictSummary.fromJson(Map<String, dynamic> json) => VerdictSummary(
+        outcome: json['outcome'] as String,
+        score: json['score'] as int,
+        hardTriggered: (json['hardTriggered'] as List? ?? const []).cast<String>(),
+      );
+}
+
+/// What a user has turned out to be vulnerable to.
+///
+/// Scores are counts: how many times this person has been approached with each
+/// kind of scam.
+class RiskProfile {
+  final String userId;
+  final int encounterCount;
+  final Map<String, int> vulnerability;
+  final Map<String, int> tacticSensitivity;
+  final Map<String, int> channels;
+  final Map<String, int> lureCounts;
+  final String? topLure;
+  final String? usualChannel;
+
+  RiskProfile({
+    required this.userId,
+    required this.encounterCount,
+    required this.vulnerability,
+    required this.tacticSensitivity,
+    required this.channels,
+    required this.lureCounts,
+    required this.topLure,
+    required this.usualChannel,
+  });
+
+  factory RiskProfile.fromJson(Map<String, dynamic> json) => RiskProfile(
+        userId: json['userId'] as String,
+        encounterCount: json['encounterCount'] as int,
+        vulnerability: (json['vulnerability'] as Map)
+            .map((k, v) => MapEntry(k as String, (v as num).toInt())),
+        tacticSensitivity: (json['tacticSensitivity'] as Map)
+            .map((k, v) => MapEntry(k as String, (v as num).toInt())),
+        channels: (json['channels'] as Map)
+            .map((k, v) => MapEntry(k as String, v as int)),
+        lureCounts: (json['lureCounts'] as Map? ?? const {})
+            .map((k, v) => MapEntry(k as String, v as int)),
+        topLure: json['topLure'] as String?,
+        usualChannel: json['usualChannel'] as String?,
+      );
+
+  bool get isEmpty => encounterCount == 0;
+}
+
 /// Result of running Claude over an existing recording's frames.
 class AnalyzeResult {
   final String recordingId;
   final List<TranscriptMessage> transcript;
+  final SignalSummary? signals;
+  final List<CheckOutcome> checks;
+  final VerdictSummary? verdict;
   final ScamAnalysis? analysis;
 
   AnalyzeResult({
     required this.recordingId,
     required this.transcript,
+    required this.signals,
+    required this.checks,
+    required this.verdict,
     required this.analysis,
   });
 
@@ -117,6 +236,15 @@ class AnalyzeResult {
         transcript: (json['transcript'] as List? ?? const [])
             .map((e) => TranscriptMessage.fromJson(e as Map<String, dynamic>))
             .toList(),
+        signals: json['signals'] == null
+            ? null
+            : SignalSummary.fromJson(json['signals'] as Map<String, dynamic>),
+        checks: (json['checks'] as List? ?? const [])
+            .map((e) => CheckOutcome.fromJson(e as Map<String, dynamic>))
+            .toList(),
+        verdict: json['verdict'] == null
+            ? null
+            : VerdictSummary.fromJson(json['verdict'] as Map<String, dynamic>),
         analysis: json['analysis'] == null
             ? null
             : ScamAnalysis.fromJson(json['analysis'] as Map<String, dynamic>),
@@ -210,8 +338,15 @@ class RecordingFramesApi {
   }
 
   /// Step 2: read the conversation out of stored frames and judge scam risk.
-  static Future<AnalyzeResult> analyzeRecording(String recordingId) async {
-    final uri = Uri.parse('$baseUrl/recordings/$recordingId/analyze');
+  ///
+  /// Passing [userId] records the result against that device's profile. Every
+  /// analysis is recorded, not only the scams.
+  static Future<AnalyzeResult> analyzeRecording(
+    String recordingId, {
+    String? userId,
+  }) async {
+    final query = (userId == null || userId.isEmpty) ? '' : '?userId=$userId';
+    final uri = Uri.parse('$baseUrl/recordings/$recordingId/analyze$query');
     final response = await http.post(uri);
 
     if (response.statusCode != 200) {
@@ -219,6 +354,38 @@ class RecordingFramesApi {
     }
 
     return AnalyzeResult.fromJson(jsonDecode(response.body) as Map<String, dynamic>);
+  }
+
+  /// What this device has been targeted with so far.
+  static Future<RiskProfile> fetchProfile(String userId) async {
+    final response = await http.get(Uri.parse('$baseUrl/users/$userId/profile'));
+    if (response.statusCode != 200) {
+      throw Exception('Backend returned ${response.statusCode}: ${response.body}');
+    }
+    return RiskProfile.fromJson(jsonDecode(response.body) as Map<String, dynamic>);
+  }
+
+  /// Development only: fill this profile with fabricated encounters.
+  ///
+  /// The screen is meant to show a vulnerability fading over months and a
+  /// habitual channel, which real testing cannot produce - analyses are all
+  /// seconds old and the channel is usually "unknown".
+  static Future<RiskProfile> loadSampleProfile(String userId) async {
+    final response =
+        await http.post(Uri.parse('$baseUrl/users/$userId/profile/demo'));
+    if (response.statusCode != 200) {
+      throw Exception('Backend returned ${response.statusCode}: ${response.body}');
+    }
+    return RiskProfile.fromJson(jsonDecode(response.body) as Map<String, dynamic>);
+  }
+
+  /// Forget everything recorded for this device.
+  static Future<RiskProfile> clearProfile(String userId) async {
+    final response = await http.delete(Uri.parse('$baseUrl/users/$userId/profile'));
+    if (response.statusCode != 200) {
+      throw Exception('Backend returned ${response.statusCode}: ${response.body}');
+    }
+    return RiskProfile.fromJson(jsonDecode(response.body) as Map<String, dynamic>);
   }
 
   static Future<Map<String, dynamic>> _send(http.MultipartRequest request) async {

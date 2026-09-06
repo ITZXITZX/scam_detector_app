@@ -6,6 +6,8 @@ import 'package:flutter_screen_recording/flutter_screen_recording.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:permission_handler/permission_handler.dart';
 
+import 'device_user.dart';
+import 'profile_screen.dart';
 import 'recording_frames_api.dart';
 
 /// Bundled screen recording used by the "Use sample recording" test button.
@@ -44,6 +46,7 @@ class _RecordingHomePageState extends State<RecordingHomePage> {
   String? _errorMessage;
   FramesResult? _frames;
   AnalyzeResult? _result;
+  RiskProfile? _profile;
 
   Future<bool> _ensurePermissions() async {
     // Android 13+ requires explicit notification permission for the
@@ -119,10 +122,23 @@ class _RecordingHomePageState extends State<RecordingHomePage> {
     });
 
     try {
-      final result = await RecordingFramesApi.analyzeRecording(recordingId);
+      final userId = await DeviceUser.id();
+      final result = await RecordingFramesApi.analyzeRecording(
+        recordingId,
+        userId: userId,
+      );
+      // Read the profile back so the result screen can say what changed. A
+      // failure here must not cost the user their verdict, so it is swallowed.
+      RiskProfile? profile;
+      try {
+        profile = await RecordingFramesApi.fetchProfile(userId);
+      } catch (_) {
+        profile = null;
+      }
       setState(() {
         _stage = _Stage.done;
         _result = result;
+        _profile = profile;
       });
     } catch (err) {
       setState(() {
@@ -181,6 +197,7 @@ class _RecordingHomePageState extends State<RecordingHomePage> {
       _recordingPath = null;
       _frames = null;
       _result = null;
+      _profile = null;
       _errorMessage = null;
     });
   }
@@ -188,7 +205,16 @@ class _RecordingHomePageState extends State<RecordingHomePage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Conversation Recorder')),
+      appBar: AppBar(
+        title: const Text('Conversation Recorder'),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.person_outline),
+            tooltip: 'Your risk pattern',
+            onPressed: _openProfile,
+          ),
+        ],
+      ),
       body: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
@@ -204,6 +230,14 @@ class _RecordingHomePageState extends State<RecordingHomePage> {
           ],
         ),
       ),
+    );
+  }
+
+  Future<void> _openProfile() async {
+    final userId = await DeviceUser.id();
+    if (!mounted) return;
+    await Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => ProfileScreen(userId: userId)),
     );
   }
 
@@ -337,6 +371,57 @@ class _RecordingHomePageState extends State<RecordingHomePage> {
     );
   }
 
+  /// "Third authority scam you've checked", shown only when this conversation
+  /// repeats a pattern.
+  ///
+  /// Stays silent on a first encounter: a line that appears every time stops
+  /// being read, and the point is to make a change visible, not to decorate.
+  Widget _buildPatternShift(AnalyzeResult result) {
+    final profile = _profile;
+    final lure = result.signals?.lureType;
+    if (profile == null || lure == null || lure == 'none') {
+      return const SizedBox.shrink();
+    }
+    final count = profile.lureCounts[lure] ?? 0;
+    if (count < 2) return const SizedBox.shrink();
+
+    final spaced = lure.replaceAll('_', ' ');
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 16),
+      child: InkWell(
+        onTap: _openProfile,
+        child: Row(
+          children: [
+            const Icon(Icons.trending_up, size: 18),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                '${_ordinal(count)} $spaced scam you have checked. '
+                'Your risk pattern updated.',
+                style: Theme.of(context).textTheme.bodyMedium,
+              ),
+            ),
+            const Icon(Icons.chevron_right, size: 18),
+          ],
+        ),
+      ),
+    );
+  }
+
+  String _ordinal(int n) {
+    if (n % 100 >= 11 && n % 100 <= 13) return '${n}th';
+    switch (n % 10) {
+      case 1:
+        return '${n}st';
+      case 2:
+        return '${n}nd';
+      case 3:
+        return '${n}rd';
+      default:
+        return '${n}th';
+    }
+  }
+
   Widget _buildTranscriptBubble(TranscriptMessage message, {required bool flagged}) {
     final isRight = message.senderHint == 'right';
     final isUnknown = message.senderHint == 'unknown';
@@ -376,6 +461,7 @@ class _RecordingHomePageState extends State<RecordingHomePage> {
     return ListView(
       children: [
         if (result?.analysis != null) _buildRiskBanner(result!.analysis!),
+        if (result != null) _buildPatternShift(result),
         if (result != null && result.transcript.isNotEmpty) ...[
           Text('Reconstructed conversation', style: Theme.of(context).textTheme.titleMedium),
           const SizedBox(height: 8),
