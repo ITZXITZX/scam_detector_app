@@ -93,18 +93,41 @@ This is an alternative to using an Android emulator. The phone and the computer 
 
 #### Configure and test the local backend connection
 
-Find the computer's Wi-Fi IPv4 address with:
+Find the computer's Wi-Fi IPv4 address.
+
+Windows:
 
 ```powershell
 ipconfig
 ```
 
-Use the IPv4 address under the connected **Wireless LAN adapter Wi-Fi** (for example, `192.168.1.14`). Do not use the WSL/Hyper-V address, `localhost`, or `10.0.2.2`; those addresses are for other environments.
+macOS (Wi-Fi is normally `en0`):
+
+```bash
+ipconfig getifaddr en0
+```
+
+Linux:
+
+```bash
+hostname -I
+```
+
+Use the private IPv4 address for the active Wi-Fi adapter (for example,
+`192.168.1.14`). On Linux, `hostname -I` may return several addresses; choose
+the one on the same subnet as the phone. Do not use a WSL/virtual-adapter
+address, `127.0.0.1`, or `10.0.2.2`.
 
 Start the backend from the `backend` directory and bind it to the local network:
 
 ```powershell
 .venv\Scripts\python.exe -m uvicorn main:app --host 0.0.0.0 --port 8000
+```
+
+On macOS or Linux:
+
+```bash
+./.venv/bin/python -m uvicorn main:app --host 0.0.0.0 --port 8000
 ```
 
 Keep this terminal running. Before installing or running the Flutter app, verify the backend on the computer:
@@ -113,14 +136,26 @@ Keep this terminal running. Before installing or running the Flutter app, verify
 http://127.0.0.1:8000/docs
 ```
 
-You can also verify that the port is listening:
+On Windows, verify that the port is listening:
 
 ```powershell
 Test-NetConnection 127.0.0.1 -Port 8000
 Test-NetConnection <computer-wifi-ip> -Port 8000
 ```
 
-Both checks should report `TcpTestSucceeded : True`. If the first check fails, the backend is not running successfully. If the first succeeds but the second fails, check the Windows Firewall instructions below (you need to allow the backend through the Frewall).
+Both checks should report `TcpTestSucceeded : True`. If the first check fails,
+the backend is not running successfully. If the first succeeds but the second
+fails, follow the Windows Firewall instructions below.
+
+On macOS or Linux, run the equivalent checks:
+
+```bash
+curl --fail http://127.0.0.1:8000/docs
+curl --fail http://<computer-wifi-ip>:8000/docs
+```
+
+A successful request prints the documentation HTML. If localhost succeeds but
+the Wi-Fi address fails, check the operating system's firewall.
 
 On the phone's browser, open:
 
@@ -129,8 +164,8 @@ http://<computer-wifi-ip>:8000/docs
 ```
 
 The FastAPI documentation page should load. If it does not, confirm that the
-phone and computer are on the same Wi-Fi network, then check the Windows
-Firewall instructions below.
+phone and computer are on the same Wi-Fi network, then check the relevant
+firewall instructions below.
 
 Run the app on the connected phone:
 
@@ -157,6 +192,39 @@ Only do this if the computer's `127.0.0.1` test succeeds but the phone cannot op
 
 After testing, remove the exception: return to **Allow an app or feature through Windows Defender Firewall**, select **Change settings**, clear the **Private** checkbox for Python (or select the Python entry and click **Remove** if it was manually added), then click **OK**. Keep **Public**
 unchecked throughout.
+
+#### Allow the backend through the macOS firewall
+
+Only do this if the local `/docs` test succeeds but the phone cannot connect.
+
+1. Open **System Settings > Network > Firewall**.
+2. Open **Options**, select **Add application**, and add the Python executable
+   used by the backend. For this project, it is `backend/.venv/bin/python`.
+3. Set it to **Allow incoming connections**, then restart Uvicorn and repeat
+   the phone `/docs` test.
+
+After testing, return to **Firewall > Options**, select that Python entry, and
+remove it (or change it to **Block incoming connections**).
+
+#### Allow the backend through a Linux firewall
+
+Firewall software differs between distributions. If Ubuntu's UFW is active,
+find the phone's Wi-Fi IP in its network settings, then allow only that device:
+
+```bash
+sudo ufw allow from <phone-wifi-ip> to any port 8000 proto tcp
+```
+
+After testing, remove the same rule:
+
+```bash
+sudo ufw delete allow from <phone-wifi-ip> to any port 8000 proto tcp
+```
+
+If `sudo ufw status` reports `inactive`, UFW is not blocking the connection.
+For systems using firewalld or another firewall, create an equivalent temporary
+TCP port 8000 rule restricted to the phone or local subnet, then remove it
+after testing.
 
 ### Troubleshooting
 
