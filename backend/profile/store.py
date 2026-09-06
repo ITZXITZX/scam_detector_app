@@ -27,6 +27,38 @@ from pattern.taxonomy import Channel, EngagementDepth, LureType, PressureTactic
 
 from .model import Encounter, Profile, build_profile
 
+# Labels that were stored before the taxonomy changed, and where they belong
+# now. The lure enum was aligned to ScamShield's categories after rows already
+# existed, and "parcel" stopped being one of them - ScamShield treats parcel
+# delivery messages as a phishing variant.
+_RENAMED_LURES = {
+    "parcel": "phishing",
+    "lottery": "other",
+    "impersonation_known_person": "fake_friend",
+}
+
+
+def _coerce(enum_cls, value: str, renames: dict[str, str] | None = None):
+    """Read a stored label, tolerating one this build no longer knows.
+
+    Enum values are written into the database, so removing one strands every
+    row that used it. A stranded row should not be able to take down a whole
+    profile: the honest failure is to lose that encounter's category, not the
+    user's history. Known renames are mapped; anything else falls back.
+    """
+    if renames and value in renames:
+        value = renames[value]
+    try:
+        return enum_cls(value)
+    except ValueError:
+        # `other`/`unknown`/first-member, in that order of preference.
+        for fallback in ("other", "unknown"):
+            try:
+                return enum_cls(fallback)
+            except ValueError:
+                continue
+        return next(iter(enum_cls))
+
 DB_PATH = Path(__file__).parent.parent / "profiles.db"
 
 _SCHEMA = """
@@ -89,10 +121,12 @@ def load_encounters(user_id: str, db_path: Path | None = None) -> list[Encounter
         Encounter(
             userId=r["user_id"],
             at=datetime.fromisoformat(r["at"]),
-            lureType=LureType(r["lure_type"]),
-            pressureTactics=tuple(PressureTactic(t) for t in json.loads(r["tactics"])),
-            channel=Channel(r["channel"]),
-            engagementDepth=EngagementDepth(r["depth"]),
+            lureType=_coerce(LureType, r["lure_type"], _RENAMED_LURES),
+            pressureTactics=tuple(
+                _coerce(PressureTactic, t) for t in json.loads(r["tactics"])
+            ),
+            channel=_coerce(Channel, r["channel"]),
+            engagementDepth=_coerce(EngagementDepth, r["depth"]),
             outcome=r["outcome"],
             score=r["score"],
             recordingId=r["recording_id"],

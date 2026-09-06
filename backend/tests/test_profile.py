@@ -222,3 +222,48 @@ def test_no_message_content_is_stored(tmp_path):
         r[1] for r in sqlite3.connect(db).execute("PRAGMA table_info(encounters)")
     }
     assert not ({"text", "message", "transcript", "url", "urls"} & columns)
+
+
+# --------------------------------------------------------------------------
+# Stored labels outliving the taxonomy that produced them
+# --------------------------------------------------------------------------
+
+
+def test_a_lure_that_was_renamed_still_loads(tmp_path):
+    """The lure enum was aligned to ScamShield's categories after rows already
+    existed, and "parcel" stopped being one. A stranded row took down the whole
+    profile endpoint with a 500.
+
+    Enum values live in the database, so removing one strands every row that
+    used it. Losing that encounter's category is an acceptable failure; losing
+    the user's history is not.
+    """
+    import sqlite3
+
+    db = tmp_path / "t.db"
+    record_encounter(encounter(), db_path=db)  # creates the schema
+    sqlite3.connect(db).execute(
+        "UPDATE encounters SET lure_type = 'parcel'"
+    ).connection.commit()
+
+    profile = get_profile("u1", now=NOW, db_path=db)
+    assert profile.encounterCount == 1
+    assert profile.vulnerability == {"phishing": 1}
+
+
+def test_a_label_nobody_recognises_does_not_break_the_profile(tmp_path):
+    import sqlite3
+
+    db = tmp_path / "t.db"
+    record_encounter(encounter(), db_path=db)
+    conn = sqlite3.connect(db)
+    conn.execute(
+        "UPDATE encounters SET lure_type = 'ponzi', channel = 'carrier_pigeon', "
+        "depth = 'sent_a_cheque', tactics = '[\"hypnosis\"]'"
+    )
+    conn.commit()
+
+    profile = get_profile("u1", now=NOW, db_path=db)
+    assert profile.encounterCount == 1
+    assert profile.vulnerability == {"other": 1}
+    assert profile.channels == {"unknown": 1}
