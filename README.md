@@ -128,20 +128,18 @@ On the phone's browser, open:
 http://<computer-wifi-ip>:8000/docs
 ```
 
-The FastAPI documentation page should load. If it does not, confirm that the phone and computer are on the same Wi-Fi network and tthen check the Windows Firewall instructions below.
+The FastAPI documentation page should load. If it does not, confirm that the
+phone and computer are on the same Wi-Fi network, then check the Windows
+Firewall instructions below.
 
-Finally, update `RecordingFramesApi.baseUrl` in
-`lib/recording_frames_api.dart` to use the computer's Wi-Fi IP address:
-
-```dart
-return 'http://<computer-wifi-ip>:8000';
-```
-
-Then run the app on the connected phone:
+Run the app on the connected phone:
 
 ```powershell
 flutter run -d <phone-device-id>
 ```
+
+Tap **Conversation Recorder** seven times, enter the computer's Wi-Fi IP on
+the Backend settings page, and tap **Save**.
 
 #### Allow the backend through Windows Firewall
 
@@ -165,10 +163,9 @@ unchecked throughout.
 - **Backend connection failed:** confirm the backend terminal is still running
     on port 8000. Android emulators must use `10.0.2.2`, which the app is already
     configured to do.
-- **Using a physical phone:** the current client defaults to localhost or
-    `10.0.2.2`. Update `RecordingFramesApi.baseUrl` in
-    `lib/recording_frames_api.dart` to your computer's LAN IP, keep port 8000
-    open on the computer, and put both devices on the same network.
+- **Using a physical phone:** tap **Conversation Recorder** seven times and set
+    the backend address to your computer's Wi-Fi IP. Keep port 8000 open on the
+    computer and put both devices on the same network.
 - **Recording permission denied:** allow screen recording and notifications in
     the emulator/device settings, then restart the flow.
 
