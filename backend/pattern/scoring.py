@@ -27,7 +27,12 @@ class Outcome(str, Enum):
 # Checks that decide the verdict on their own. Reserved for cases where a benign
 # explanation is hard to construct: a real agency does not send you to a domain
 # it does not own.
-HARD_TRIGGERS = frozenset({"C2"})
+# C13 and C14 are here because ScamShield's own wording is categorical: "any
+# unsolicited loan offer is a scam", and remote-access software installed at the
+# request of an unsolicited caller "gives them full control of your device".
+# Deferring to a published rule is a better basis for deciding a verdict alone
+# than a weight chosen to make an example come out right.
+HARD_TRIGGERS = frozenset({"C2", "C13", "C14"})
 
 # Everything else contributes points. C3 is deliberately not a hard trigger:
 # brand-token matching can misfire, and a false SCAM verdict trains people to
@@ -39,6 +44,11 @@ CHECK_POINTS = {
     "C4": 40,
     "C5": 35,
     "C7": 20,
+    "C12": 50,
+    "C13": 100,  # also a hard trigger; scored so the number reflects severity
+    "C14": 100,  # also a hard trigger
+    "C15": 45,
+    "C16": 40,
     # C11 is scored from the label below rather than a flat value.
 }
 

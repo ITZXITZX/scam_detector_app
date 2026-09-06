@@ -70,12 +70,16 @@ class RequestedAction(str, Enum):
     """
 
     TRANSFER_MONEY = "transfer_money"
+    TRANSFER_CRYPTO = "transfer_crypto"
     SHARE_CREDENTIALS = "share_credentials"
     SHARE_OTP = "share_otp"
+    SHARE_SINGPASS = "share_singpass"
     SHARE_ID_DOCUMENT = "share_id_document"
     INSTALL_APP = "install_app"
+    INSTALL_REMOTE_ACCESS = "install_remote_access"
     CLICK_LINK = "click_link"
     BUY_GIFTCARD = "buy_giftcard"
+    PAY_UPFRONT_FEE = "pay_upfront_fee"
     MEET_IN_PERSON = "meet_in_person"
     NONE = "none"
 
@@ -160,6 +164,21 @@ class Signals:
     channel: Channel = Channel.UNKNOWN
     engagementDepth: EngagementDepth = EngagementDepth.NO_REPLY
     urls: tuple[str, ...] = field(default_factory=tuple)
+    # Whether the other party made contact out of the blue. Nearly every
+    # ScamShield category begins with "unsolicited contact", and several of
+    # their rules only hold for an approach the user did not initiate: a loan
+    # advertisement is a scam when unsolicited and ordinary when answered.
+    unsolicitedContact: bool = False
+    # Whether the other party made contact out of the blue. Nearly every
+    # ScamShield category begins with "unsolicited contact", and several of
+    # their rules only hold for an approach the user did not initiate: a loan
+    # advertisement is a scam when unsolicited and ordinary when answered.
+    unsolicitedContact: bool = False
+    # Whether the other party made contact out of the blue. Nearly every
+    # ScamShield category begins with "unsolicited contact", and several of
+    # their rules only hold for an approach the user did not initiate: a loan
+    # advertisement is a scam when unsolicited and ordinary when answered.
+    unsolicitedContact: bool = False
     modelSuspicion: ModelSuspicion = ModelSuspicion.NONE
     modelSuspicionReason: str = ""
 

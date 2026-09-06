@@ -137,6 +137,7 @@ class SignalSummary(BaseModel):
     channel: str
     engagementDepth: str
     urls: list[str]
+    unsolicitedContact: bool
     modelSuspicion: str
     modelSuspicionReason: str
 
@@ -725,6 +726,7 @@ async def analyze_recording(recording_id: str, userId: str = "") -> AnalyzeRespo
             channel=signals.channel.value,
             engagementDepth=signals.engagementDepth.value,
             urls=list(signals.urls),
+            unsolicitedContact=signals.unsolicitedContact,
             modelSuspicion=signals.modelSuspicion.value,
             modelSuspicionReason=signals.modelSuspicionReason,
         ),

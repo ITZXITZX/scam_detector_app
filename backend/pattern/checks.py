@@ -1,5 +1,14 @@
 """The deterministic checks.
 
+Checks C12 onward come from rules ScamShield publishes rather than from
+judgement about what looks suspicious. Where their wording is categorical -
+"banks will never send you any clickable links via SMS", "any unsolicited loan
+offer is a scam" - the check is categorical too, and its docstring quotes the
+line it rests on. That is a better provenance than weights fitted to whichever
+screenshots happened to be at hand.
+
+Source: scamshield.gov.sg, "Learn to recognise scams", retrieved 2026-09-06.
+
 Each check is a pure function of labelled signals. No network, no model, no
 clock, no randomness: the same conversation always produces the same result,
 and the result can be explained to the person it is about.
@@ -13,7 +22,15 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from .domains import impersonated_brand, is_allowlisted, near_miss_domain, registrable_domain
-from .taxonomy import ModelSuspicion, PressureTactic, RequestedAction, Signals
+from .taxonomy import (
+    Channel,
+    ClaimedIdentity,
+    LureType,
+    ModelSuspicion,
+    PressureTactic,
+    RequestedAction,
+    Signals,
+)
 
 
 @dataclass(frozen=True)
@@ -92,7 +109,13 @@ def c4_credential_request(signals: Signals) -> CheckResult:
     """
     asked = [
         a for a in signals.requestedActions
-        if a in (RequestedAction.SHARE_CREDENTIALS, RequestedAction.SHARE_OTP)
+        if a in (
+            RequestedAction.SHARE_CREDENTIALS,
+            RequestedAction.SHARE_OTP,
+            # "SPF officers will NEVER request your banking, SingPass and/or
+            # CPF related information."
+            RequestedAction.SHARE_SINGPASS,
+        )
     ]
     if asked:
         wanted = " and ".join(a.value.replace("_", " ") for a in asked)
@@ -155,6 +178,111 @@ def c11_model_suspicion(signals: Signals) -> CheckResult:
     return CheckResult("C11", True, reason)
 
 
+def c12_bank_link_over_sms(signals: Signals) -> CheckResult:
+    """A link in an SMS that claims to come from a bank.
+
+    ScamShield: "Banks will never send you any clickable links via SMS."
+
+    Scored high rather than treated as decisive only because our channel
+    detection is weak - it reports "unknown" more often than not - so this
+    fires rarely and should not be the sole grounds for a verdict when it does.
+    """
+    if signals.claimedIdentity is not ClaimedIdentity.BANK:
+        return CheckResult("C12", False)
+    if signals.channel is not Channel.SMS or not signals.urls:
+        return CheckResult("C12", False)
+    return CheckResult(
+        "C12", True,
+        "Sends a link by SMS while claiming to be a bank. Banks never do this",
+    )
+
+
+def c13_unsolicited_loan_offer(signals: Signals) -> CheckResult:
+    """A loan offered to someone who did not ask for one.
+
+    ScamShield: "Any unsolicited loan offer is a scam." Licensed moneylenders
+    are prohibited from advertising except in directories and on their own
+    sites, so an approach offering a loan is either an unlicensed lender or a
+    scammer, and neither is safe to deal with.
+
+    Categorical in the source, so categorical here.
+    """
+    if signals.lureType is not LureType.LOAN or not signals.unsolicitedContact:
+        return CheckResult("C13", False)
+    return CheckResult(
+        "C13", True,
+        "Offers a loan you did not ask for. Licensed moneylenders are not "
+        "allowed to advertise this way",
+    )
+
+
+def c14_remote_access_requested(signals: Signals) -> CheckResult:
+    """Being talked into installing remote-access software.
+
+    ScamShield: "Never download remote access applications at the request of an
+    unsolicited caller, as this gives them full control of your device."
+
+    The step that turns a tech-support scam into an emptied bank account: once
+    the software is installed the scammer operates the victim's own banking
+    session.
+    """
+    if not signals.asks_for(RequestedAction.INSTALL_REMOTE_ACCESS):
+        return CheckResult("C14", False)
+    if not signals.unsolicitedContact:
+        return CheckResult("C14", False)
+    return CheckResult(
+        "C14", True,
+        "Asks you to install software that hands over control of your device, "
+        "after contacting you out of the blue",
+    )
+
+
+def c15_job_wants_money_first(signals: Signals) -> CheckResult:
+    """A job that costs money to start.
+
+    ScamShield lists as scam indicators that the job requires you to "pay
+    upfront before starting" or "use your own money to complete tasks".
+
+    Their wording is "likely a scam" rather than "never", so this scores instead
+    of deciding: commission-based work exists, even if work that bills you does
+    not.
+    """
+    if signals.lureType is not LureType.JOB:
+        return CheckResult("C15", False)
+    if not signals.asks_for(
+        RequestedAction.PAY_UPFRONT_FEE,
+        RequestedAction.TRANSFER_MONEY,
+        RequestedAction.TRANSFER_CRYPTO,
+    ):
+        return CheckResult("C15", False)
+    return CheckResult(
+        "C15", True, "Offers work but asks you to pay or transfer money first",
+    )
+
+
+def c16_untraceable_payment(signals: Signals) -> CheckResult:
+    """Payment demanded in a form that cannot be reversed.
+
+    Gift cards, game credits and cryptocurrency appear across ScamShield's
+    tech-support, romance and sexual-service pages as the payment methods
+    scammers ask for. Their crypto page is explicit about why: "cryptocurrency
+    transfers are non-reversible" and "difficult to trace".
+
+    A legitimate seller has no reason to prefer a payment nobody can recover.
+    """
+    asked = [
+        a for a in signals.requestedActions
+        if a in (RequestedAction.BUY_GIFTCARD, RequestedAction.TRANSFER_CRYPTO)
+    ]
+    if not asked:
+        return CheckResult("C16", False)
+    how = " and ".join(a.value.replace("_", " ") for a in asked)
+    return CheckResult(
+        "C16", True,
+        f"Wants payment by {how}, which cannot be reversed or traced",
+    )
+
+
 ALL_CHECKS = (
     c1_unofficial_domain,
     c2_authority_claim_unofficial_link,
@@ -163,6 +291,11 @@ ALL_CHECKS = (
     c5_payment_under_authority,
     c7_isolation,
     c11_model_suspicion,
+    c12_bank_link_over_sms,
+    c13_unsolicited_loan_offer,
+    c14_remote_access_requested,
+    c15_job_wants_money_first,
+    c16_untraceable_payment,
 )
 
 

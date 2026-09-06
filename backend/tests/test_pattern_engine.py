@@ -22,6 +22,7 @@ from pattern.domains import (  # noqa: E402
 )
 from pattern.scoring import Outcome, decide  # noqa: E402
 from pattern.taxonomy import (  # noqa: E402
+    Channel,
     ClaimedIdentity,
     LureType,
     ModelSuspicion,
@@ -304,3 +305,125 @@ def test_model_suspicion_without_a_reason_still_says_something():
     verdict = decide(Signals(modelSuspicion=ModelSuspicion.STRONG))
     assert "C11" in _fired(verdict)
     assert verdict.reasons  # never an empty explanation
+
+
+# --------------------------------------------------------------------------
+# Checks derived from ScamShield's published rules
+#
+# These weights are not fitted to a screenshot. Each rests on a line ScamShield
+# publishes, quoted in the check's docstring, and where their wording is
+# categorical the check decides the verdict alone.
+# --------------------------------------------------------------------------
+
+
+def test_bank_link_over_sms_fires():
+    """ScamShield: "Banks will never send you any clickable links via SMS"."""
+    verdict = decide(
+        Signals(
+            claimedIdentity=ClaimedIdentity.BANK,
+            channel=Channel.SMS,
+            urls=("https://dbs-secure.example.test/verify",),
+        )
+    )
+    assert "C12" in _fired(verdict)
+
+
+def test_bank_link_in_a_chat_app_does_not_fire_the_sms_rule():
+    """The rule is about SMS specifically, so the check has to be too."""
+    verdict = decide(
+        Signals(
+            claimedIdentity=ClaimedIdentity.BANK,
+            channel=Channel.WHATSAPP,
+            urls=("https://dbs-secure.example.test/verify",),
+        )
+    )
+    assert "C12" not in _fired(verdict)
+
+
+def test_unsolicited_loan_offer_decides_the_verdict():
+    """ScamShield: "Any unsolicited loan offer is a scam".
+
+    Licensed moneylenders are prohibited from advertising, so an approach
+    offering a loan is either unlicensed or a scammer. Categorical in the
+    source, so categorical here.
+    """
+    verdict = decide(Signals(lureType=LureType.LOAN, unsolicitedContact=True))
+    assert verdict.outcome is Outcome.SCAM
+    assert "C13" in verdict.hardTriggered
+
+
+def test_a_loan_the_user_went_looking_for_is_not_the_same_thing():
+    """The rule turns on the offer being unsolicited. Someone who searched for a
+    loan and is talking to a lender has not met that condition."""
+    verdict = decide(Signals(lureType=LureType.LOAN, unsolicitedContact=False))
+    assert "C13" not in _fired(verdict)
+    assert verdict.outcome is Outcome.COULDNT_CONFIRM
+
+
+def test_remote_access_from_an_unsolicited_caller_decides_the_verdict():
+    """ScamShield: "Never download remote access applications at the request of
+    an unsolicited caller, as this gives them full control of your device"."""
+    verdict = decide(
+        Signals(
+            lureType=LureType.TECH_SUPPORT,
+            requestedActions=(RequestedAction.INSTALL_REMOTE_ACCESS,),
+            unsolicitedContact=True,
+        )
+    )
+    assert verdict.outcome is Outcome.SCAM
+    assert "C14" in verdict.hardTriggered
+
+
+def test_remote_access_the_user_asked_for_is_not_flagged():
+    """Support the user called themselves is the case the rule excludes."""
+    verdict = decide(
+        Signals(
+            lureType=LureType.TECH_SUPPORT,
+            requestedActions=(RequestedAction.INSTALL_REMOTE_ACCESS,),
+            unsolicitedContact=False,
+        )
+    )
+    assert "C14" not in _fired(verdict)
+
+
+def test_job_asking_for_money_first_fires():
+    """ScamShield lists "pay upfront before starting the job" as a scam sign."""
+    verdict = decide(
+        Signals(
+            lureType=LureType.JOB,
+            requestedActions=(RequestedAction.PAY_UPFRONT_FEE,),
+        )
+    )
+    assert "C15" in _fired(verdict)
+
+
+def test_an_ordinary_job_offer_does_not_fire():
+    verdict = decide(Signals(lureType=LureType.JOB))
+    assert "C15" not in _fired(verdict)
+    assert verdict.outcome is Outcome.COULDNT_CONFIRM
+
+
+def test_gift_card_and_crypto_payments_fire():
+    """Gift cards, game credits and crypto recur across ScamShield's pages as
+    what scammers ask for, because the transfers cannot be reversed."""
+    for action in (RequestedAction.BUY_GIFTCARD, RequestedAction.TRANSFER_CRYPTO):
+        verdict = decide(Signals(requestedActions=(action,)))
+        assert "C16" in _fired(verdict), action
+
+
+def test_singpass_request_counts_as_a_credential_request():
+    """ScamShield: "SPF officers will NEVER request your banking, SingPass
+    and/or CPF related information"."""
+    verdict = decide(Signals(requestedActions=(RequestedAction.SHARE_SINGPASS,)))
+    assert "C4" in _fired(verdict)
+
+
+def test_the_new_checks_stay_quiet_on_an_empty_conversation():
+    """Five new checks, none of which should fire on nothing.
+
+    Every check so far has been tested against scams. The failure that matters
+    for a scam detector nobody uninstalls is the opposite one.
+    """
+    verdict = decide(Signals())
+    assert not ({"C12", "C13", "C14", "C15", "C16"} & _fired(verdict))
+    assert verdict.outcome is Outcome.COULDNT_CONFIRM
